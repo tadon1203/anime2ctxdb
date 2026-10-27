@@ -18,6 +18,10 @@ Read a document only when its trigger applies. Do not read them all up front.
 | `docs/git-workflow.md`     | Commit branch and commit message rules              | You commit or prepare a commit                |
 | `docs/agents/tickets.md`   | Spec and ticket files and their template            | You use a spec or ticket skill                |
 
+## Judgment
+
+- For a code decision, such as design or naming, prefer the boring, ordinary, common, and conventional option. Choose the usual option, not the clever one. Do not use an ornate or enterprise-style design or name.
+
 ## Writing
 
 - Write code comments and documents (`*.md`, doc comments, commit messages) in Simplified Technical English (ASD-STE100): short sentences, one meaning for each word, active voice, and simple verb tenses.
