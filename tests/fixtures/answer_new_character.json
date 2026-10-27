@@ -1,0 +1,8 @@
+{
+  "new_characters": [{ "ref": "N1", "name": "明智あんな", "reading": "あけちあんな", "evidence": ["L1"] }],
+  "labels": [{ "label": "あんな", "kind": "character", "character": "N1" },
+             { "label": "窓の開く音", "kind": "sound" }],
+  "colors": [{ "color": "#FFFF00", "character": "N1" }],
+  "lines": [{ "line": "L2", "characters": ["N1"] },
+            { "line": "L3", "characters": [] }]
+}

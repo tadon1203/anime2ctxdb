@@ -26,9 +26,9 @@ Every item has a source in the original work and a confidence. The package holds
 ## What the user does
 
 - The user gives source files to the product.
-- The user approves or rejects proposals from the product.
-- The user carries job files to an external AI tool and brings the responses back.
-- The user never enters data by hand.
+- The user approves or rejects suggestions from the product.
+- The user copies prompts to an external AI tool and pastes the answers back.
+- The user never enters story data by hand. The user can correct the episode and the language of an imported file.
 
 ## Scope
 
