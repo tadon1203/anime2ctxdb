@@ -1,0 +1,442 @@
+﻿[Script Info]
+Title: 名探偵プリキュア！　＃１
+Original Script: FLsnow
+Synch Point: 0
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+Timer: 100.0000
+Original Editing: WBX
+Script Updated By: Left
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Droid Sans Fallback,83,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,1.5,0,1,3,3,2,15,15,23,1
+Style: CureAnsw,Droid Sans Fallback,83,&H00FFFFFF,&H00FFFFFF,&H00FF7FC6,&H64FEACD2,-1,0,0,0,100,100,1.5,0,1,3,3,2,15,15,23,1
+Style: CureMyst,Droid Sans Fallback,83,&H00FFFFFF,&H00FFFFFF,&H00A654FF,&H64A17AFF,-1,0,0,0,100,100,1.5,0,1,3,3,2,15,15,23,1
+Style: DarkGar,Droid Sans Fallback,83,&H00000000,&H00FFFFFF,&H00FFFFFF,&H641B1B1D,-1,0,0,0,100,100,1.5,0,1,3,3,2,15,15,23,1
+Style: OP,方正粗倩简体,50,&H00FDFCFF,&HF0000000,&H00E59AE2,&H00E59AE2,-1,0,0,0,100,100,0,0,1,1,4,2,30,30,1,134
+Style: ED,方正粗倩简体,50,&H00E488D2,&HF0000000,&H00FFFFFF,&H00000000,-1,0,0,0,100,100,0,0,1,0,2,2,30,30,1,134
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:03.85,Default,NTP,0,0,0,,{\an7}真未来镇
+Dialogue: 0,0:00:03.94,0:00:07.69,Default,NTP,0,0,0,,{\an7}{\fs50}不是... 这哪里的异世界横滨...
+Dialogue: 0,0:00:10.79,0:00:11.86,Default,NTP,0,0,0,,{\an3}我来拿！
+Dialogue: 0,0:00:11.99,0:00:12.80,Default,NTP,0,0,0,,诶？
+Dialogue: 0,0:00:12.94,0:00:14.93,Default,NTP,0,0,0,,生日派对 要迟到了
+Dialogue: 0,0:00:15.53,0:00:19.03,Default,NTP,0,0,0,,欲速则不达！安那！
+Dialogue: 0,0:00:20.46,0:00:23.14,Default,NTP,0,0,0,,我知道的！嘻嘻
+Dialogue: 0,0:00:23.28,0:00:26.26,Default,NTP,0,0,0,,（哭泣声）
+Dialogue: 0,0:00:27.21,0:00:29.45,Default,NTP,0,0,0,,你怎么了？
+Dialogue: 0,0:00:30.64,0:00:31.90,Default,NTP,0,0,0,,是迷路了吗...
+Dialogue: 0,0:00:36.79,0:00:39.30,Default,NTP,0,0,0,,啊... 马上帮你找到！
+Dialogue: 0,0:00:41.93,0:00:44.32,Default,NTP,0,0,0,,我不会说谎的！
+Dialogue: 0,0:00:44.84,0:00:46.08,Default,NTP,0,0,0,,拜托照顾一下！
+Dialogue: 0,0:00:51.50,0:00:52.25,Default,NTP,0,0,150,,啊...
+Dialogue: 0,0:00:54.42,0:00:55.28,Default,NTP,0,0,150,,找到了！
+Dialogue: 0,0:00:55.58,0:00:56.62,Default,NTP,0,0,150,,哇...
+Dialogue: 0,0:01:01.07,0:01:04.52,Default,NTP,0,0,0,,你居然能知道 她的发带被风吹走了
+Dialogue: 0,0:01:04.87,0:01:07.78,Default,NTP,0,0,0,,因为她只戴着一边的 这是关键点！
+Dialogue: 0,0:01:07.88,0:01:09.75,Default,NTP,0,0,0,,{\an7}安那 生日快乐
+Dialogue: 0,0:01:10.07,0:01:14.66,Default,NTP,0,0,0,,哇 圆满小红花般的美味
+Dialogue: 0,0:01:15.05,0:01:17.56,Default,NTP,0,0,0,,好了 我也要开始准备了！
+Dialogue: 0,0:01:17.84,0:01:19.48,Default,NTP,0,0,0,,铆足了劲呢
+Dialogue: 0,0:01:19.62,0:01:20.75,Default,NTP,0,0,0,,当然的吧
+Dialogue: 0,0:01:21.10,0:01:23.20,Default,NTP,0,0,0,,要把今天打造成特别的日子
+Dialogue: 0,0:01:20.93,0:01:23.93,Default,NTP,0,0,0,,{\an7}1点派对
+Dialogue: 0,0:01:24.06,0:01:25.19,Default,NTP,0,0,0,,我去挂外套
+Dialogue: 0,0:01:39.37,0:01:41.84,Default,NTP,0,0,0,,妈妈！谢谢！
+Dialogue: 0,0:01:42.00,0:01:43.42,Default,NTP,0,0,0,,诶？怎么了？
+Dialogue: 0,0:01:43.92,0:01:45.97,Default,NTP,0,0,0,,生日礼物啦！
+Dialogue: 0,0:01:46.64,0:01:51.61,Default,NTP,0,0,0,,说什么呢 不是说好买手机送你的吗
+Dialogue: 0,0:01:56.96,0:02:00.41,Default,NTP,0,0,0,,毕竟是14岁！大人的感觉
+Dialogue: 0,0:02:02.23,0:02:03.42,Default,NTP,0,0,0,,啵奇...
+Dialogue: 0,0:02:05.08,0:02:06.47,Default,NTP,0,0,0,,啵奇！
+Dialogue: 0,0:02:06.62,0:02:11.47,Default,NTP,0,0,0,,诶？诶？什么 狗还是猫？
+Dialogue: 0,0:02:11.65,0:02:13.26,Default,NTP,0,0,0,,啵奇探啦啵奇！
+Dialogue: 0,0:02:11.65,0:02:13.26,Default,NTP,0,0,0,,{\an7}{\fs50}本作小精灵的tan，优先理解为侦探的探\N此外tan是“酱”的幼儿语，类似宝宝贝贝\N在系列前作里也都有过\N\N主要小精灵的词源基本都来自甜点\N啵奇是Pocky
+Dialogue: 0,0:02:13.82,0:02:14.92,Default,NTP,0,0,0,,说... 说话...
+Dialogue: 0,0:02:15.05,0:02:16.48,Default,NTP,0,0,0,,安静点啵奇！
+Dialogue: 0,0:02:21.28,0:02:22.21,Default,NTP,0,0,0,,啥啊...
+Dialogue: 0,0:02:22.47,0:02:24.06,Default,NTP,0,0,0,,希望你跟我一起走啵奇！
+Dialogue: 0,0:02:24.23,0:02:25.11,Default,NTP,0,0,0,,诶？
+Dialogue: 0,0:02:25.32,0:02:27.23,Default,NTP,0,0,0,,就用这个吊坠！
+Dialogue: 0,0:02:27.42,0:02:29.09,Default,NTP,0,0,0,,啊 啊！
+Dialogue: 0,0:02:42.68,0:02:45.61,Default,NTP,0,0,0,,还没有完成说明啊啵奇！
+Dialogue: 0,0:02:46.49,0:02:47.58,Default,NTP,0,0,0,,安那
+Dialogue: 0,0:02:48.84,0:02:51.09,Default,NTP,0,0,0,,吵什么呢... 咦？
+Dialogue: 0,0:02:51.85,0:02:53.66,Default,NTP,0,0,0,,不在了
+Dialogue: 0,0:04:27.16,0:04:32.41,Default,NTP,0,0,0,,{\c&HA872F8&\3c&HFFFFFF&\4c&HD6B883&}诞生！名侦探光之美少女！
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:04:32.97,0:04:35.32,Default,NTP,0,0,0,,{\an7}{\fs50}这集还没讲清楚，待下集确认含义
+Dialogue: 0,0:04:32.97,0:04:35.32,Default,NTP,0,0,0,,Cure式侦探事务所
+Dialogue: 0,0:04:35.48,0:04:37.13,Default,NTP,0,0,0,,这一天终于来了
+Dialogue: 0,0:04:37.83,0:04:40.68,Default,NTP,0,0,0,,绝对要通过测试！
+Dialogue: 0,0:04:44.33,0:04:46.25,Default,NTP,0,0,0,,打扰... 嗯
+Dialogue: 0,0:04:49.27,0:04:50.59,Default,NTP,0,0,0,,嗯？
+Dialogue: 0,0:04:51.44,0:04:53.34,Default,NTP,0,0,0,,呜哇
+Dialogue: 0,0:04:53.48,0:04:54.64,Default,NTP,0,0,0,,呜诶
+Dialogue: 0,0:04:57.73,0:04:59.65,Default,NTP,0,0,0,,啵奇！
+Dialogue: 0,0:05:07.78,0:05:09.43,Default,NTP,0,0,0,,怎 怎么了？
+Dialogue: 0,0:05:10.10,0:05:10.90,Default,NTP,0,0,0,,啵奇！
+Dialogue: 0,0:05:11.09,0:05:12.35,Default,NTP,0,0,0,,因为这个
+Dialogue: 0,0:05:12.56,0:05:15.10,Default,NTP,0,0,0,,真是的！究竟发生了什么事！
+Dialogue: 0,0:05:15.27,0:05:16.69,Default,NTP,0,0,0,,我搞不明白
+Dialogue: 0,0:05:16.80,0:05:17.46,Default,NTP,0,0,0,,小精灵啊！
+Dialogue: 0,0:05:17.61,0:05:18.71,Default,NTP,0,0,0,,啵奇？
+Dialogue: 0,0:05:19.40,0:05:21.32,Default,NTP,0,0,0,,你跟小精灵一起 也就是说
+Dialogue: 0,0:05:21.46,0:05:24.03,Default,NTP,0,0,0,,你是Cure式侦探事务所的名侦探吧！
+Dialogue: 0,0:05:24.95,0:05:25.62,Default,NTP,0,0,0,,诶？
+Dialogue: 0,0:05:26.26,0:05:28.26,Default,NTP,0,0,0,,我叫小林未来！
+Dialogue: 0,0:05:26.26,0:05:28.26,Default,NTP,0,0,0,,{\an7}{\fs50}姓氏致敬了明智小五郎的徒弟\N少年侦探小林芳雄\N考虑到时间穿越元素，译作未来\N再者声优曾出演魔法圣诞回女孩\N见到过“未来”\N也出演过甜点的剑城未来\N你相信巧合吗？
+Dialogue: 0,0:05:28.42,0:05:30.72,Default,NTP,0,0,0,,啊 我叫明智安那
+Dialogue: 0,0:05:28.42,0:05:32.08,Default,NTP,0,0,0,,{\an7}{\fs50}姓氏致敬明智小五郎\N按主流观点，名字都与Cure名对应\NAna选择与日文发音接近的汉字\N再者可能有些牵强附会\N也许致敬了美国作家\N安娜·凯瑟琳·格林\N她是第一位女性长篇推理小说家\N创作出了第一位少女侦探主角\N被誉为推理小说教母\N影响了阿加莎等多位推理作家。
+Dialogue: 0,0:05:30.84,0:05:32.08,Default,NTP,0,0,0,,不是！不是干这个的时候！
+Dialogue: 0,0:05:32.42,0:05:33.80,Default,NTP,0,0,0,,小精灵是什么
+Dialogue: 0,0:05:33.95,0:05:36.20,Default,NTP,0,0,0,,刚还在房间里 怎么就到这来了！
+Dialogue: 0,0:05:38.07,0:05:41.04,Default,NTP,0,0,0,,难不成 侦探测试已经开始了？
+Dialogue: 0,0:05:41.42,0:05:42.55,Default,NTP,0,0,0,,真是的！
+Dialogue: 0,0:05:42.88,0:05:44.18,Default,NTP,0,0,0,,我来解答吧！
+Dialogue: 0,0:05:44.98,0:05:48.53,Default,NTP,0,0,0,,有名的侦探 夏洛特·福尔摩斯有云
+Dialogue: 0,0:05:48.70,0:05:52.48,Default,NTP,0,0,0,,看鞋子上的污渍和伤痕 就能判断对方的来处！
+Dialogue: 0,0:05:52.67,0:05:54.68,Default,NTP,0,0,0,,你就来自！
+Dialogue: 0,0:05:57.13,0:06:00.35,Default,NTP,0,0,0,,没有... 穿鞋！
+Dialogue: 0,0:06:01.22,0:06:04.06,Default,NTP,0,0,0,,{\an7}折扣店
+Dialogue: 0,0:06:01.22,0:06:04.06,Default,NTP,0,0,0,,多种新功能 领先时代！
+Dialogue: 0,0:06:05.02,0:06:06.59,Default,NTP,0,0,0,,接着是天气预报！
+Dialogue: 0,0:06:06.76,0:06:08.52,Default,NTP,0,0,0,,今天...
+Dialogue: 0,0:06:08.68,0:06:09.70,Default,NTP,0,0,0,,很合脚！
+Dialogue: 0,0:06:11.56,0:06:12.52,Default,NTP,0,0,0,,哪个好？
+Dialogue: 0,0:06:12.68,0:06:14.82,Default,NTP,0,0,0,,这个！...不是！
+Dialogue: 0,0:06:15.18,0:06:17.72,Default,NTP,0,0,0,,从房间里掉下来 是不可能的！
+Dialogue: 0,0:06:18.08,0:06:19.28,Default,NTP,0,0,0,,真的啦！
+Dialogue: 0,0:06:19.44,0:06:20.85,Default,NTP,0,0,0,,啵奇啵奇！
+Dialogue: 0,0:06:21.00,0:06:23.15,Default,NTP,0,0,0,,你光说“啵奇啵奇” 别人不懂意思的
+Dialogue: 0,0:06:23.60,0:06:24.80,Default,NTP,0,0,0,,这孩子...
+Dialogue: 0,0:06:24.98,0:06:27.69,Default,NTP,0,0,0,,咿咿呀呀的 还是小宝宝吧
+Dialogue: 0,0:06:28.07,0:06:29.54,Default,NTP,0,0,0,,所以才不会说话
+Dialogue: 0,0:06:29.84,0:06:31.21,Default,NTP,0,0,0,,诶 可是刚才...
+Dialogue: 0,0:06:31.54,0:06:34.73,Default,NTP,0,0,0,,因为某些缘由 变成了小宝宝 就不能说话了
+Dialogue: 0,0:06:35.08,0:06:39.25,Default,NTP,0,0,0,,这个推理怎么样！侦探测试合格了吗？
+Dialogue: 0,0:06:39.51,0:06:42.54,Default,NTP,0,0,0,,你那侦探测试是什么？
+Dialogue: 0,0:06:42.91,0:06:46.10,Default,NTP,0,0,0,,这个问题 太简单了！
+Dialogue: 0,0:06:47.11,0:06:52.00,Default,NTP,0,0,0,,名侦探是协助人们 调查解决各种事件的 ！
+Dialogue: 0,0:06:52.16,0:06:54.10,Default,NTP,0,0,0,,是大家的憧憬！希望！
+Dialogue: 0,0:06:54.45,0:06:59.54,Default,NTP,0,0,0,,我是为了成为名侦探 来接受侦探测试的！
+Dialogue: 0,0:07:00.27,0:07:02.40,Default,NTP,0,0,0,,名侦探很厉害呢！
+Dialogue: 0,0:07:02.73,0:07:04.02,Default,NTP,0,0,0,,{\an1}100分
+Dialogue: 0,0:07:03.01,0:07:03.92,Default,NTP,0,0,0,,好！
+Dialogue: 0,0:07:04.34,0:07:07.03,Default,NTP,0,0,0,,啵奇！啵奇！
+Dialogue: 0,0:07:07.17,0:07:07.98,Default,NTP,0,0,0,,诶
+Dialogue: 0,0:07:08.14,0:07:08.93,Default,NTP,0,0,0,,啵奇！
+Dialogue: 0,0:07:09.78,0:07:10.88,Default,NTP,0,0,0,,喂！
+Dialogue: 0,0:07:13.15,0:07:14.38,Default,NTP,0,0,0,,啵奇！
+Dialogue: 0,0:07:16.37,0:07:17.76,Default,NTP,0,0,0,,还没付钱！
+Dialogue: 0,0:07:19.65,0:07:22.42,Default,NTP,0,0,0,,我帮你垫付鞋子钱了
+Dialogue: 0,0:07:22.59,0:07:23.74,Default,NTP,0,0,0,,谢谢
+Dialogue: 0,0:07:23.92,0:07:25.38,Default,NTP,0,0,0,,啵奇啵奇！
+Dialogue: 0,0:07:26.60,0:07:27.96,Default,NTP,0,0,0,,这里是...
+Dialogue: 0,0:07:28.11,0:07:29.55,Default,NTP,0,0,0,,婚礼馆？
+Dialogue: 0,0:07:32.18,0:07:35.26,Default,NTP,0,0,0,,没了！掉哪了
+Dialogue: 0,0:07:37.80,0:07:41.43,Default,NTP,0,0,0,,幸野小姐 谢谢你
+Dialogue: 0,0:07:43.64,0:07:46.15,Default,NTP,0,0,0,,- 是新娘子！
+Dialogue: 0,0:07:46.59,0:07:47.88,Default,NTP,0,0,0,,那个就算了吧...
+Dialogue: 0,0:07:48.04,0:07:48.98,Default,NTP,0,0,0,,- 诶？
+Dialogue: 0,0:07:49.10,0:07:49.89,Default,NTP,0,0,0,,可是...
+Dialogue: 0,0:07:51.77,0:07:53.83,Default,NTP,0,0,0,,仪式要来不及了
+Dialogue: 0,0:07:54.61,0:07:56.28,Default,NTP,0,0,0,,邦邦... 她
+Dialogue: 0,0:08:00.20,0:08:01.30,Default,NTP,0,0,0,,你们好！
+Dialogue: 0,0:08:01.79,0:08:04.81,Default,NTP,0,0,0,,如果有麻烦的话 我来帮忙
+Dialogue: 0,0:08:05.01,0:08:06.11,Default,NTP,0,0,0,,诶
+Dialogue: 0,0:08:08.17,0:08:11.09,Default,NTP,0,0,330,,{\fad(440,440)}{\fs50}婚礼策划幸野幸代
+Dialogue: 0,0:08:06.89,0:08:11.01,Default,NTP,0,0,0,,自我介绍一下 我是场馆的工作人员 鄙姓幸野
+Dialogue: 0,0:08:11.68,0:08:13.36,Default,NTP,0,0,0,,我是想田麻里
+Dialogue: 0,0:08:13.51,0:08:16.80,Default,NTP,0,0,0,,是这样的 要在仪式上戴的头冠找不到了
+Dialogue: 0,0:08:16.98,0:08:17.89,Default,NTP,0,0,0,,- 诶？
+Dialogue: 0,0:08:18.07,0:08:21.02,Default,NTP,0,0,0,,但是... 那个呢？
+Dialogue: 0,0:08:21.32,0:08:25.61,Default,NTP,0,0,0,,是为了赶上1点的仪式 场馆另外提供的
+Dialogue: 0,0:08:26.37,0:08:30.74,Default,NTP,0,0,0,,想办法找到了和麻里小姐那个 外观大小都相近的
+Dialogue: 0,0:08:31.18,0:08:33.45,Default,NTP,0,0,0,,这个是麻里小姐原本的头冠
+Dialogue: 0,0:08:33.69,0:08:37.61,Default,NTP,0,0,0,,那是妈妈结婚时戴过的头冠
+Dialogue: 0,0:08:37.81,0:08:41.00,Default,NTP,0,0,0,,我也想戴着进行仪式
+Dialogue: 0,0:08:41.60,0:08:43.84,Default,NTP,0,0,0,,丢失前就放在这房间的...
+Dialogue: 0,0:08:43.99,0:08:45.59,Default,NTP,0,0,0,,突然就消失了...
+Dialogue: 0,0:08:47.09,0:08:50.62,Default,NTP,0,0,0,,难道 这才是真正的侦探测试！
+Dialogue: 0,0:08:51.90,0:08:53.19,Default,NTP,0,0,0,,我...
+Dialogue: 0,0:08:53.80,0:08:55.57,Default,NTP,0,0,0,,绝对会找到的！
+Dialogue: 0,0:08:56.90,0:08:58.82,Default,NTP,0,0,0,,怎么了？把我们叫过来
+Dialogue: 0,0:08:59.90,0:09:02.56,Default,NTP,0,0,0,,麻里小姐说最后见到头冠的时候
+Dialogue: 0,0:09:02.72,0:09:05.42,Default,NTP,0,0,0,,出入房间的 就只有你们3人
+Dialogue: 0,0:09:05.58,0:09:09.32,Default,NTP,0,0,0,,你们之中 有偷走头冠的犯人！
+Dialogue: 0,0:09:11.61,0:09:13.87,Default,NTP,0,0,0,,不会的！不可能的！
+Dialogue: 0,0:09:14.02,0:09:14.98,Default,NTP,0,0,0,,诶...
+Dialogue: 0,0:09:15.12,0:09:16.95,Default,NTP,0,0,0,,也... 也是吧
+Dialogue: 0,0:09:17.10,0:09:20.42,Default,NTP,0,0,0,,就是 想问一问线索...
+Dialogue: 0,0:09:22.10,0:09:24.94,Default,NTP,0,0,0,,我是来给新娘拍照的
+Dialogue: 0,0:09:22.46,0:09:25.50,Default,NTP,0,0,330,,{\fad(440,0)}{\fs50}摄影师 宇都见将太
+Dialogue: 0,0:09:25.89,0:09:28.11,Default,NTP,0,0,0,,我是有事情来拜托麻里的
+Dialogue: 0,0:09:25.57,0:09:28.71,Default,NTP,0,0,330,,{\fad(440,0)}{\fs50}麻里的朋友 藤井友佳
+Dialogue: 0,0:09:29.04,0:09:30.32,Default,NTP,0,0,0,,什么事？
+Dialogue: 0,0:09:30.47,0:09:33.14,Default,NTP,0,0,0,,想让我把捧花朝友佳那里丢
+Dialogue: 0,0:09:33.33,0:09:35.07,Default,NTP,0,0,0,,啊！新娘抛花
+Dialogue: 0,0:09:35.67,0:09:38.86,Default,NTP,0,0,0,,对！能接到新娘子抛出的捧花
+Dialogue: 0,0:09:39.02,0:09:41.38,Default,NTP,0,0,0,,就能够分享到幸福！
+Dialogue: 0,0:09:41.53,0:09:43.45,Default,NTP,0,0,0,,我一直都好向往的！
+Dialogue: 0,0:09:43.83,0:09:45.72,Default,NTP,0,0,0,,这都可以求的啊
+Dialogue: 0,0:09:45.97,0:09:48.32,Default,NTP,0,0,0,,麻里 答应了呢？
+Dialogue: 0,0:09:48.94,0:09:52.94,Default,NTP,0,0,0,,难得友佳没有迟到 所以就答应了...
+Dialogue: 0,0:09:53.50,0:09:54.82,Default,NTP,0,0,0,,原来如此
+Dialogue: 0,0:09:55.74,0:09:58.98,Default,NTP,0,0,0,,我是为了准备仪式 而进入房间的
+Dialogue: 0,0:09:59.53,0:10:02.98,Default,NTP,0,0,0,,大家来这里的时候 都是穿着同一件衣服吗？
+Dialogue: 0,0:10:03.32,0:10:06.92,Default,NTP,0,0,0,,诶 没有能够藏头冠的...
+Dialogue: 0,0:10:07.27,0:10:09.15,Default,NTP,0,0,0,,是吗...
+Dialogue: 0,0:10:11.62,0:10:12.48,Default,NTP,0,0,0,,帽子...
+Dialogue: 0,0:10:13.20,0:10:15.06,Default,NTP,0,0,0,,会不会藏到帽子里了
+Dialogue: 0,0:10:15.87,0:10:16.74,Default,NTP,0,0,0,,啥？
+Dialogue: 0,0:10:16.89,0:10:20.63,Default,NTP,0,0,0,,确实是说 这个头冠跟麻里小姐的差不多大小
+Dialogue: 0,0:10:21.31,0:10:22.80,Default,NTP,0,0,0,,能借一下帽子吗？
+Dialogue: 0,0:10:23.11,0:10:23.73,Default,NTP,0,0,0,,啊
+Dialogue: 0,0:10:25.96,0:10:26.98,Default,NTP,0,0,0,,嗯...
+Dialogue: 0,0:10:27.80,0:10:30.31,Default,NTP,0,0,0,,放不进入 这样没法带走
+Dialogue: 0,0:10:30.63,0:10:32.10,Default,NTP,0,0,0,,友佳小姐的包包呢？
+Dialogue: 0,0:10:34.30,0:10:35.63,Default,NTP,0,0,0,,也放不进
+Dialogue: 0,0:10:36.44,0:10:39.06,Default,NTP,0,0,0,,幸野小姐的小包也不行吧
+Dialogue: 0,0:10:41.52,0:10:44.51,Default,NTP,0,0,0,,谢谢... 已经足够了
+Dialogue: 0,0:10:45.70,0:10:48.99,Default,NTP,0,0,0,,我还是放弃找那顶头冠了
+Dialogue: 0,0:10:52.31,0:10:54.90,Default,NTP,0,0,0,,只要能知道 带走头冠的方法
+Dialogue: 0,0:10:55.18,0:10:57.36,Default,NTP,0,0,0,,就能知道犯人的...
+Dialogue: 0,0:10:59.20,0:11:01.60,Default,NTP,0,0,0,,就是不知道那方法...
+Dialogue: 0,0:11:02.08,0:11:05.29,Default,NTP,0,0,0,,我这人... 就总是...
+Dialogue: 0,0:11:06.87,0:11:07.74,Default,NTP,0,0,0,,未来...
+Dialogue: 0,0:11:08.90,0:11:09.63,Default,NTP,0,0,0,,未来！
+Dialogue: 0,0:11:09.76,0:11:10.73,Default,NTP,0,0,0,,啊...
+Dialogue: 0,0:11:12.74,0:11:13.80,Default,NTP,0,0,0,,还好吧？
+Dialogue: 0,0:11:16.27,0:11:18.06,Default,NTP,0,0,0,,不知道...
+Dialogue: 0,0:11:18.39,0:11:20.98,Default,NTP,0,0,0,,这样子没法让麻里小姐笑起来
+Dialogue: 0,0:11:21.18,0:11:22.95,Default,NTP,0,0,0,,也成不了名侦探...
+Dialogue: 0,0:11:23.18,0:11:25.53,Default,NTP,0,0,0,,你为什么想成为名侦探？
+Dialogue: 0,0:11:26.04,0:11:28.13,Default,NTP,0,0,0,,因为我获得过帮助...
+Dialogue: 0,0:11:28.33,0:11:32.38,Default,NTP,0,0,0,,所以 我想要成为名侦探 来帮助大家！
+Dialogue: 0,0:11:33.14,0:11:34.56,Default,NTP,0,0,0,,你真的很厉害！
+Dialogue: 0,0:11:35.93,0:11:38.52,Default,NTP,0,0,0,,名侦探的话 就能找到头冠
+Dialogue: 0,0:11:38.68,0:11:40.68,Default,NTP,0,0,0,,让麻里小姐展露笑容的吧？
+Dialogue: 0,0:11:40.95,0:11:42.87,Default,NTP,0,0,0,,诶... 肯定的吧
+Dialogue: 0,0:11:43.30,0:11:45.96,Default,NTP,0,0,0,,那就成为名侦探吧！
+Dialogue: 0,0:11:46.75,0:11:48.01,Default,NTP,0,0,0,,但是...
+Dialogue: 0,0:11:48.44,0:11:50.40,Default,NTP,0,0,0,,在这里烦恼 是不会开始的！
+Dialogue: 0,0:11:51.16,0:11:54.71,Default,NTP,0,0,0,,迈出第一步 答案自然来！
+Dialogue: 0,0:11:55.37,0:11:58.45,Default,NTP,0,0,0,,一步的勇气 会成为答案... 的哦！
+Dialogue: 0,0:11:58.78,0:12:00.20,Default,NTP,0,0,0,,啵奇！
+Dialogue: 0,0:12:00.81,0:12:04.23,Default,NTP,0,0,0,,未来 走吧！再全部调查一次！
+Dialogue: 0,0:12:04.45,0:12:05.64,Default,NTP,0,0,0,,是！
+Dialogue: 0,0:12:11.45,0:12:13.10,Default,NTP,0,0,0,,今天是第二次了
+Dialogue: 0,0:12:13.40,0:12:16.46,Default,NTP,0,0,0,,刚才也有个女孩子 发带掉到了绿化带...
+Dialogue: 0,0:12:17.06,0:12:19.70,Default,NTP,0,0,0,,掉到绿化带... 里...
+Dialogue: 0,0:12:21.01,0:12:22.12,Default,NTP,0,0,0,,花？
+Dialogue: 0,0:12:28.00,0:12:31.52,Default,NTP,0,0,0,,- 找到了！这就是答案！
+Dialogue: 0,0:12:32.35,0:12:33.27,Default,NTP,0,0,0,,犯人是
+Dialogue: 0,0:12:33.42,0:12:34.53,Default,NTP,0,0,0,,那个人！
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:12:43.97,0:12:45.46,Default,NTP,0,0,0,,知道犯人是谁了
+Dialogue: 0,0:12:46.17,0:12:47.10,Default,NTP,0,0,0,,- 诶！
+Dialogue: 0,0:12:47.49,0:12:48.73,Default,NTP,0,0,0,,究竟是谁？
+Dialogue: 0,0:12:49.35,0:12:50.87,Default,NTP,0,0,0,,- 犯人是...
+Dialogue: 0,0:12:53.71,0:12:54.97,Default,NTP,0,0,0,,- 你！
+Dialogue: 0,0:12:55.61,0:12:56.73,Default,NTP,0,0,0,,诶...
+Dialogue: 0,0:12:57.81,0:13:01.58,Default,NTP,0,0,0,,讨厌 头冠是装不到包包里的吧？
+Dialogue: 0,0:13:01.77,0:13:04.34,Default,NTP,0,0,0,,不可能带出去的
+Dialogue: 0,0:13:04.61,0:13:08.56,Default,NTP,0,0,0,,诶 头冠还在这间房间里
+Dialogue: 0,0:13:08.74,0:13:09.72,Default,NTP,0,0,0,,- 诶
+Dialogue: 0,0:13:10.28,0:13:15.01,Default,NTP,0,0,0,,你拜托麻里小姐 把捧花丢给你
+Dialogue: 0,0:13:15.27,0:13:17.63,Default,NTP,0,0,0,,然后把头冠放到了捧花里
+Dialogue: 0,0:13:18.92,0:13:22.21,Default,NTP,0,0,0,,打算着 等麻里小姐把捧花丢给你之后
+Dialogue: 0,0:13:22.41,0:13:24.65,Default,NTP,0,0,0,,从中取出头冠
+Dialogue: 0,0:13:27.47,0:13:30.57,Default,NTP,0,0,0,,（掌声）
+Dialogue: 0,0:13:32.64,0:13:34.42,Default,NTP,0,0,0,,能干啊
+Dialogue: 0,0:13:34.96,0:13:38.28,Default,NTP,0,0,0,,但是 你们犯了一个大错误
+Dialogue: 0,0:13:39.26,0:13:41.99,Default,NTP,0,0,0,,我不是友佳
+Dialogue: 0,0:13:44.28,0:13:49.04,DarkGar,NTP,0,0,0,,我叫腻吉！幻影怪盗团的怪盗
+Dialogue: 0,0:13:44.28,0:13:49.04,Default,NTP,0,0,0,,{\an7}{\fs50}结合作品要素\N名字含义"二点"\N应该比"彩虹"靠谱\N译名选择了保留意向的字
+Dialogue: 0,0:13:49.51,0:13:51.99,Default,NTP,0,0,0,,幻影... 怪盗团
+Dialogue: 0,0:13:52.90,0:13:56.05,DarkGar,NTP,0,0,0,,这变装 让你们看迷糊了吧！
+Dialogue: 0,0:13:56.77,0:13:58.21,DarkGar,NTP,0,0,0,,我不客气了
+Dialogue: 0,0:14:00.32,0:14:01.64,Default,NTP,0,0,0,,头冠！
+Dialogue: 0,0:14:01.79,0:14:02.15,Default,NTP,0,0,0,,诶！
+Dialogue: 0,0:14:02.29,0:14:03.18,Default,NTP,0,0,0,,（开窗声）
+Dialogue: 0,0:14:03.47,0:14:04.69,Default,NTP,0,0,0,,不好！
+Dialogue: 0,0:14:07.93,0:14:09.94,Default,NTP,0,0,0,,等等！
+Dialogue: 0,0:14:10.22,0:14:11.59,Default,NTP,0,0,0,,好快...
+Dialogue: 0,0:14:11.87,0:14:13.37,Default,NTP,0,0,0,,啵奇！
+Dialogue: 0,0:14:13.54,0:14:15.22,Default,NTP,0,0,0,,诶 哇！
+Dialogue: 0,0:14:22.63,0:14:24.56,DarkGar,NTP,0,0,0,,缠人的小宝贝啊
+Dialogue: 0,0:14:25.30,0:14:26.46,Default,NTP,0,0,0,,把头冠还回来
+Dialogue: 0,0:14:26.73,0:14:28.17,DarkGar,NTP,0,0,0,,没法答应你们
+Dialogue: 0,0:14:28.54,0:14:32.07,DarkGar,NTP,0,0,0,,这顶头冠里 寄宿着真宝石
+Dialogue: 0,0:14:32.35,0:14:33.99,Default,NTP,0,0,0,,真宝石？
+Dialogue: 0,0:14:34.34,0:14:39.77,DarkGar,NTP,0,0,0,,新娘子珍惜头冠的心意 引来真宝石
+Dialogue: 0,0:14:41.78,0:14:44.83,DarkGar,NTP,0,0,0,,我们的目标是收下这宝石
+Dialogue: 0,0:14:45.35,0:14:49.46,DarkGar,NTP,0,0,0,,对啊！作为头冠的代替 给你看一场精彩的秀吧！
+Dialogue: 0,0:14:50.60,0:14:52.02,DarkGar,NTP,0,0,0,,谎言啊 蒙蔽吧！
+Dialogue: 0,0:14:53.62,0:14:55.71,DarkGar,NTP,0,0,0,,出来吧！疑犯兽！
+Dialogue: 0,0:15:02.96,0:15:05.14,DarkGar,NTP,0,0,0,,疑犯
+Dialogue: 0,0:15:10.28,0:15:13.82,DarkGar,NTP,0,0,0,,这是幻影新开发的疑犯兽！
+Dialogue: 0,0:15:14.07,0:15:16.82,DarkGar,NTP,0,0,0,,秀开始了！宝贝！
+Dialogue: 0,0:15:18.07,0:15:20.72,DarkGar,NTP,0,0,0,,疑犯！
+Dialogue: 0,0:15:28.43,0:15:29.93,Default,NTP,0,0,0,,要想办法...
+Dialogue: 0,0:15:30.59,0:15:33.43,Default,NTP,0,0,0,,有... 什么办法...
+Dialogue: 0,0:15:35.65,0:15:38.65,DarkGar,NTP,0,0,0,,好了 侦探游戏结束了
+Dialogue: 0,0:15:39.53,0:15:42.33,DarkGar,NTP,0,0,0,,震颤的瞳孔 叙述着一切
+Dialogue: 0,0:15:43.42,0:15:48.45,DarkGar,NTP,0,0,0,,你不是侦探 只是东施效颦 假扮侦探
+Dialogue: 0,0:15:51.04,0:15:52.33,Default,NTP,0,0,0,,是真的侦探！
+Dialogue: 0,0:15:54.00,0:15:56.48,Default,NTP,0,0,0,,未来会成为名侦探的！
+Dialogue: 0,0:15:57.53,0:15:58.95,DarkGar,NTP,0,0,0,,名侦探？
+Dialogue: 0,0:15:59.60,0:16:01.25,DarkGar,NTP,0,0,0,,想破脑袋也不可能
+Dialogue: 0,0:16:01.51,0:16:02.59,Default,NTP,0,0,0,,可以的！
+Dialogue: 0,0:16:03.69,0:16:07.46,Default,NTP,0,0,0,,所以 我想要成为名侦探 来帮助大家！
+Dialogue: 0,0:16:08.64,0:16:11.06,Default,NTP,0,0,0,,她有着一颗助人为乐的心！
+Dialogue: 0,0:16:11.78,0:16:16.07,DarkGar,NTP,0,0,0,,别逞强了 你其实也在害怕吧？
+Dialogue: 0,0:16:18.35,0:16:20.87,Default,NTP,0,0,0,,是的 很害怕...
+Dialogue: 0,0:16:21.56,0:16:24.45,Default,NTP,0,0,0,,是很害怕 但是想拿回头冠！
+Dialogue: 0,0:16:25.92,0:16:29.54,Default,NTP,0,0,0,,我也想帮助 遇到困难的麻里小姐！
+Dialogue: 0,0:16:31.50,0:16:33.05,Default,NTP,0,0,0,,和未来一起！
+Dialogue: 0,0:16:39.34,0:16:41.12,Default,NTP,0,0,0,,未来...
+Dialogue: 0,0:16:41.81,0:16:43.26,Default,NTP,0,0,0,,一步的勇气...
+Dialogue: 1,0:16:41.81,0:16:43.26,CureMyst,NTP,0,0,0,,{\fad(1000,0)}一步的勇气...
+Dialogue: 0,0:16:44.05,0:16:45.87,Default,NTP,0,0,0,,会成为答案！
+Dialogue: 1,0:16:44.05,0:16:45.87,CureAnsw,NTP,0,0,0,,{\fad(1000,0)}会成为答案！
+Dialogue: 0,0:16:47.36,0:16:50.51,DarkGar,NTP,0,0,0,,那就让我见识一下 你们所说的答案！
+Dialogue: 0,0:16:51.18,0:16:52.55,DarkGar,NTP,0,0,0,,疑犯！
+Dialogue: 0,0:16:54.09,0:16:56.65,CureAnsw,NTP,0,0,0,,由我们来... 夺回！
+Dialogue: 0,0:16:54.09,0:16:56.65,CureMyst,NTP,0,0,0,,由我们来... 夺回！
+Dialogue: 0,0:16:59.58,0:17:00.18,CureAnsw,NTP,0,0,0,,诶！
+Dialogue: 0,0:17:00.28,0:17:01.63,CureMyst,NTP,0,0,0,,哇
+Dialogue: 0,0:17:02.15,0:17:02.97,CureAnsw,NTP,0,0,0,,和我的...
+Dialogue: 0,0:17:03.48,0:17:04.68,CureMyst,NTP,0,0,0,,一样...
+Dialogue: 0,0:17:10.55,0:17:13.05,Default,NTP,0,0,0,,噗哩Q娃！
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:17:17.40,0:17:18.34,CureAnsw,NTP,0,0,0,,开启！
+Dialogue: 0,0:17:17.40,0:17:18.34,CureMyst,NTP,0,0,0,,{\fs50}Open！
+Dialogue: 0,0:17:23.38,0:17:24.91,CureAnsw,NTP,0,0,0,,宝石治愈怀表！
+Dialogue: 0,0:17:23.38,0:17:24.91,CureMyst,NTP,0,0,0,,{\fs50}Jewel Cure Watch！
+Dialogue: 0,0:17:27.89,0:17:30.10,CureAnsw,NTP,0,0,0,,光美！觉醒时刻！
+Dialogue: 0,0:17:27.89,0:17:30.10,CureMyst,NTP,0,0,0,,{\fs50}Precure！Wake Up Time！
+Dialogue: 0,0:17:30.49,0:17:31.36,CureMyst,NTP,0,0,0,,三！
+Dialogue: 0,0:17:31.69,0:17:32.60,CureAnsw,NTP,0,0,0,,发现！
+Dialogue: 0,0:17:45.16,0:17:46.27,CureAnsw,NTP,0,0,0,,六！
+Dialogue: 0,0:17:46.44,0:17:47.36,CureMyst,NTP,0,0,0,,面对！
+Dialogue: 0,0:17:59.22,0:18:00.27,CureMyst,NTP,0,0,0,,九！
+Dialogue: 0,0:18:00.44,0:18:01.84,CureAnsw,NTP,0,0,0,,奇迹的两个人！
+Dialogue: 0,0:18:10.95,0:18:12.14,CureAnsw,NTP,0,0,0,,划圈拨动！
+Dialogue: 0,0:18:13.10,0:18:14.62,CureMyst,NTP,0,0,0,,换装可爱！
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:18:38.82,0:18:41.35,CureAnsw,NTP,0,0,0,,任何谜题都能圆满解决！
+Dialogue: 0,0:18:41.65,0:18:44.27,CureAnsw,NTP,0,0,0,,名侦探 解谜愈！
+Dialogue: 0,0:18:41.65,0:18:44.27,CureAnsw,NTP,150,0,0,,{\fs50}Cure Answer
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:18:46.93,0:18:49.58,CureMyst,NTP,0,0,0,,以连环推理让笑容雀跃！
+Dialogue: 0,0:18:50.20,0:18:53.07,CureMyst,NTP,0,0,0,,名侦探 技秘愈！
+Dialogue: 0,0:18:50.20,0:18:53.07,CureMyst,NTP,150,0,0,,{\fs50}Cure Mystique
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:18:57.52,0:18:59.48,CureAnsw,NTP,0,0,0,,名侦探光之美少女！
+Dialogue: 0,0:18:57.52,0:18:59.48,CureMyst,NTP,0,0,0,,{\fs50}Star Detective Precure！
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:19:02.08,0:19:04.41,CureAnsw,NTP,0,0,0,,我来把答案讲给你听！
+Dialogue: 0,0:19:04.82,0:19:06.64,DarkGar,NTP,0,0,0,,疑犯！
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:19:13.34,0:19:18.30,Default,NTP,0,0,0,,{\an7}{\fs50}Mystique按照唱名，取技巧秘诀之意，同时保留神秘意向\N再者... 侦探作品，有点玩心，几位Q娃名号的译名将采用押韵形式
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:19:14.70,0:19:16.62,CureAnsw,NTP,0,0,0,,我说了噗哩Q娃？
+Dialogue: 0,0:19:17.13,0:19:18.27,CureMyst,NTP,0,0,0,,名侦探！
+Dialogue: 0,0:19:18.49,0:19:21.64,CureMyst,NTP,0,0,0,,我想成为的就是名侦探光之美少女！
+Dialogue: 0,0:19:21.82,0:19:23.42,CureAnsw,NTP,0,0,0,,诶 这就是
+Dialogue: 0,0:19:23.85,0:19:25.23,Default,NTP,0,0,0,,啵奇！
+Dialogue: 0,0:19:26.18,0:19:27.96,DarkGar,NTP,0,0,0,,居然是Precure？
+Dialogue: 0,0:19:28.48,0:19:30.69,DarkGar,NTP,0,0,0,,和她不同... 是新人吗
+Dialogue: 0,0:19:31.83,0:19:33.25,DarkGar,NTP,0,0,0,,疑犯！
+Dialogue: 0,0:19:54.15,0:19:56.21,DarkGar,NTP,0,0,0,,这种程度 是打不倒的！
+Dialogue: 0,0:19:59.44,0:20:00.65,CureAnsw,NTP,0,0,0,,一步的勇气
+Dialogue: 0,0:20:01.08,0:20:02.28,CureMyst,NTP,0,0,0,,会成为答案！
+Dialogue: 0,0:20:12.67,0:20:19.34,CureAnsw,NTP,0,0,0,,这就是我们的Answer！
+Dialogue: 0,0:20:12.67,0:20:19.34,CureMyst,NTP,0,0,0,,这就是我们的Answer！
+Dialogue: 0,0:20:25.31,0:20:26.96,CureAnsw,NTP,0,0,0,,以Cure的方式解决！
+Dialogue: 0,0:20:25.31,0:20:26.96,CureMyst,NTP,0,0,0,,以Cure的方式解决！
+Dialogue: 0,0:20:29.32,0:20:32.40,DarkGar,NTP,0,0,0,,疑犯
+Dialogue: 0,0:20:40.33,0:20:43.34,DarkGar,NTP,0,0,0,,咕... 今天就拉下帷幕吧！
+Dialogue: 0,0:20:45.53,0:20:46.66,CureMyst,NTP,0,0,0,,消失了！
+Dialogue: 0,0:20:50.51,0:20:52.58,Default,NTP,0,0,0,,- 恭喜！
+Dialogue: 0,0:20:53.16,0:20:55.86,CureAnsw,NTP,0,0,0,,太好了... 赶上仪式了
+Dialogue: 0,0:20:57.37,0:20:59.17,CureMyst,NTP,0,0,0,,谢谢你了！
+Dialogue: 0,0:20:59.61,0:21:01.49,CureAnsw,NTP,0,0,0,,与其说是我的功劳...
+Dialogue: 0,0:21:01.67,0:21:03.47,CureAnsw,NTP,0,0,0,,啊！怪盗
+Dialogue: 0,0:21:03.63,0:21:05.48,CureMyst,NTP,0,0,0,,是真的友佳小姐啦
+Dialogue: 0,0:21:05.66,0:21:08.03,Default,NTP,0,0,0,,抱歉 来晚了！
+Dialogue: 0,0:21:08.53,0:21:09.68,Default,NTP,0,0,0,,走咯！
+Dialogue: 0,0:21:12.33,0:21:13.68,Default,NTP,0,0,0,,太好了！
+Dialogue: 0,0:21:14.49,0:21:18.86,CureAnsw,NTP,0,0,0,,啊！我该回去了！生日派对就要！
+Dialogue: 0,0:21:19.01,0:21:23.56,CureMyst,NTP,0,0,0,,那个！既然成为了Precure 就是说测试合格了吧！
+Dialogue: 0,0:21:23.71,0:21:26.68,CureMyst,NTP,0,0,0,,1999年4月！
+Dialogue: 0,0:21:26.82,0:21:31.65,CureMyst,NTP,0,0,0,,我终于也成为Cure式侦探事务所的名侦探了！
+Dialogue: 0,0:21:32.19,0:21:36.86,CureAnsw,NTP,0,0,0,,1999年？又在说奇怪的话
+Dialogue: 0,0:21:37.02,0:21:38.20,Default,NTP,0,0,0,,啵奇？
+Dialogue: 0,0:21:38.60,0:21:44.53,CureMyst,NTP,0,0,0,,不不 今天是1999年4月2日 春天！你看
+Dialogue: 0,0:21:47.02,0:21:49.30,CureAnsw,NTP,0,0,0,,诶... 樱花...
+Dialogue: 0,0:21:49.89,0:21:54.20,CureAnsw,NTP,0,0,0,,我那边是2027年1月 冬天...
+Dialogue: 0,0:21:54.87,0:22:03.20,CureAnsw,NTP,0,0,0,,难不成... 我穿越时间到了以前
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:23:36.58,0:23:39.11,CureAnsw,NTP,0,0,0,,Precure是什么 时间穿越又是什么
+Dialogue: 0,0:23:39.26,0:23:40.03,Default,NTP,0,0,0,,啵奇
+Dialogue: 0,0:23:40.18,0:23:42.51,CureMyst,NTP,0,0,0,,去那里的话 或许就能解决！
+Dialogue: 0,0:23:42.66,0:23:43.62,CureAnsw,NTP,0,0,0,,那里是？
+Dialogue: 0,0:23:43.76,0:23:45.43,CureMyst,NTP,0,0,0,,Cure式侦探事务所！
+Dialogue: 0,0:23:46.44,0:23:47.71,CureAnsw,NTP,0,0,0,,名侦探光之美少女！
+Dialogue: 0,0:23:47.86,0:23:50.86,CureAnsw,NTP,0,0,0,,天才登场！他叫砎特前辈！
+Dialogue: 0,0:23:51.26,0:23:53.55,CureAnsw,NTP,0,0,0,,那个谜题！以Cure的方式解决！
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:23:58.73,0:24:00.62,CureMyst,NTP,0,0,0,,哇 好棒！
+Dialogue: 0,0:24:01.34,0:24:03.57,CureAnsw,NTP,0,0,0,,大家画得真好 得小红花！
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:02:58.03,0:03:05.08,OP,NTP,0,0,0,,去寻找吧 让内心灵光闪现！的提示
+Dialogue: 0,0:03:05.58,0:03:08.37,OP,NTP,0,0,0,,定能找到 我们可是 噗哩Q娃
+Dialogue: 0,0:03:08.37,0:03:11.12,OP,NTP,0,0,0,,在呼唤着我们
+Dialogue: 0,0:03:11.12,0:03:14.00,OP,NTP,0,0,0,,真相在哪里？发现了什么？
+Dialogue: 0,0:03:14.00,0:03:17.37,OP,NTP,0,0,0,,谜题在呼唤着谜题
+Dialogue: 0,0:03:18.30,0:03:23.39,OP,NTP,0,0,0,,从现在穿梭过去与未来 收集起碎片
+Dialogue: 0,0:03:23.80,0:03:28.93,OP,NTP,0,0,0,,那是像证据一样 超越时空的闪耀
+Dialogue: 0,0:03:29.15,0:03:31.81,OP,NTP,0,0,0,,为啥？为啥？是诡计吗？
+Dialogue: 0,0:03:31.98,0:03:34.48,OP,NTP,0,0,0,,什么？什么？勇于面对
+Dialogue: 0,0:03:35.06,0:03:40.32,OP,NTP,0,0,0,,灵光乍现 解开秘密
+Dialogue: 0,0:03:40.70,0:03:46.37,OP,NTP,0,0,0,,勇气的一步 能指引奇迹
+Dialogue: 0,0:03:46.54,0:03:51.91,OP,NTP,0,0,0,,答案!? 察觉到微乎其微的线索之时
+Dialogue: 0,0:03:51.91,0:03:57.71,OP,NTP,0,0,0,,命运啊 喜欢啊 都是小小声音
+Dialogue: 0,0:03:57.71,0:04:00.88,OP,NTP,0,0,0,,一起前行吧！
+Dialogue: 0,0:04:01.17,0:04:06.76,OP,NTP,0,0,0,,去寻找吧 让内心灵光闪现！的提示
+Dialogue: 0,0:04:06.89,0:04:12.48,OP,NTP,0,0,0,,宝石的钥匙 会打开下一份相系友谊
+Dialogue: 0,0:04:12.77,0:04:17.61,OP,NTP,0,0,0,,啊 我来到这世界 与你相逢的神秘
+Dialogue: 0,0:04:17.69,0:04:21.44,OP,NTP,0,0,0,,前进吧！名侦探噗哩Q娃！
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
+Dialogue: 0,0:22:06.03,0:22:08.76,ED,NTP,0,0,0,,（WeiWeiWeiWei 为什么？为什么？WHY?）
+Dialogue: 0,0:22:08.90,0:22:11.87,ED,NTP,0,0,0,,（WeiWeiWeiWei 未解之谜？未解之谜！ANSWER?!）
+Dialogue: 0,0:22:17.07,0:22:19.90,ED,NTP,0,0,0,,把点和点连起来 哎哟？哎哟！
+Dialogue: 0,0:22:19.90,0:22:22.82,ED,NTP,0,0,0,,“圆满解决”了吧？了吧？
+Dialogue: 0,0:22:22.82,0:22:27.95,ED,NTP,0,0,0,,推理谜题翻个面 二翻三翻 逆转了
+Dialogue: 0,0:22:28.66,0:22:31.45,ED,NTP,0,0,0,,{\c&HE5BDF0&}口吻举动 陷阱？陷阱！
+Dialogue: 0,0:22:31.45,0:22:34.33,ED,NTP,0,0,0,,{\c&HE5BDF0&}囫囵吞枣 不行！不行！
+Dialogue: 0,0:22:34.45,0:22:39.60,ED,NTP,0,0,0,,{\c&HE5BDF0&}仔细观察细心思考 然后再迈出第一步！
+Dialogue: 0,0:22:40.27,0:22:45.96,ED,NTP,0,0,0,,见到有困难的人 就马上想帮助他
+Dialogue: 0,0:22:45.96,0:22:50.97,ED,NTP,0,0,0,,都还没有想出来 到底能做点什么 就已经冲了过去
+Dialogue: 0,0:22:50.97,0:22:57.14,ED,NTP,0,0,0,,Mi Mi Mi谜题！谜题！能解谜题的是名侦探☆
+Dialogue: 0,0:22:57.35,0:23:02.56,ED,NTP,0,0,0,,看穿或是伪装 找到笑容答案
+Dialogue: 0,0:23:02.56,0:23:08.63,ED,NTP,0,0,0,,Wei Wei Wei为什么？为什么？ 和大家一起勇气有百倍
+Dialogue: 0,0:23:08.86,0:23:14.16,ED,NTP,0,0,0,,{\c&HE5BDF0&}齐心协力跨越难关 友谊是奇迹的集合
+Dialogue: 0,0:23:14.16,0:23:16.33,ED,NTP,0,0,0,,出发！名侦探☆
+Dialogue: 0,0:23:17.04,0:23:23.13,ED,NTP,0,0,0,,Wei Wei Wei为什么？为什么？ 和大家一起勇气有百倍
+Dialogue: 0,0:23:23.34,0:23:28.63,ED,NTP,0,0,0,,和伙伴手牵手 直到万事解决！
+Dialogue: 0,0:23:28.63,0:23:30.09,ED,NTP,0,0,0,,我们可是光之美少女☆
+Dialogue: 0,0:23:30.09,0:23:32.80,ED,NTP,0,0,0,,（WeiWeiWeiWei 未解之谜？未解之谜?!ANSWER!）
+Dialogue: 0,0:00:00.00,0:00:00.00,Default,NTP,0,0,0,,
