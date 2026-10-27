@@ -13,6 +13,10 @@ pub struct SuggestionId(pub String);
 
 impl SuggestionId {
     /// The prompt number and the position. Sort by these two numbers, not by the text.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the ID does not have the form `<prompt>-<n>`.
     pub fn sort_key(&self) -> (u32, u32) {
         let (prompt, position) = self
             .0

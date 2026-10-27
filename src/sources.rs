@@ -4,7 +4,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
-use std::fmt;
+use std::fmt::{self, Write};
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -167,7 +167,10 @@ fn hash_file(path: &Path) -> Result<SourceId> {
         hasher.update(&block[..read]);
     }
     let digest = hasher.finalize();
-    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in &digest {
+        write!(hex, "{byte:02x}").expect("writing to a String does not fail");
+    }
     Ok(SourceId(hex))
 }
 

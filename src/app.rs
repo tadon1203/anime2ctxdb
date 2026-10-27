@@ -170,7 +170,7 @@ impl App {
         let Some(series) = &self.series else {
             return;
         };
-        match load_views(series, &self.filter) {
+        match load_views(series, self.filter) {
             Ok((saved, rows, progress)) => {
                 self.saved = saved;
                 self.rows = rows;
@@ -576,11 +576,11 @@ impl App {
 /// Reads the three views from the series.
 fn load_views(
     series: &Series,
-    filter: &SuggestionFilter,
+    filter: SuggestionFilter,
 ) -> Result<(Vec<Source>, Vec<SuggestionRow>, Vec<EpisodeProgress>)> {
     Ok((
         series.sources()?,
-        series.suggestions(filter)?,
+        series.suggestions(&filter)?,
         series.progress()?,
     ))
 }

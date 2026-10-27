@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 /// A series directory. It holds only its path, so it can be cloned and sent to a thread.
 /// Each call opens its own index.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Series {
     dir: PathBuf,
 }

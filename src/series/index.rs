@@ -40,6 +40,13 @@ struct Data {
     reviews: HashMap<SuggestionId, Review>,
 }
 
+/// The labels, colors, and line speakers that the approved suggestions set.
+struct ApprovedContent {
+    labels: HashMap<String, Label>,
+    colors: HashMap<u32, CharacterId>,
+    line_speakers: HashMap<LineId, Vec<CharacterId>>,
+}
+
 /// The SQLite index of one series. It holds no truth. The files hold it.
 pub struct Index {
     connection: Connection,
@@ -154,22 +161,51 @@ fn read_prompts(series_dir: &Path) -> Result<Vec<Prompt>> {
     Ok(prompts)
 }
 
-fn write_all(transaction: &Transaction, data: &Data) -> Result<()> {
-    for record in &data.records {
+fn write_all(transaction: &Transaction<'_>, data: &Data) -> Result<()> {
+    insert_sources(transaction, &data.records)?;
+    insert_lines(transaction, &data.lines)?;
+
+    let approved: Vec<&Suggestion> = data
+        .suggestions
+        .iter()
+        .filter(|suggestion| is_data(data.reviews[&suggestion.id]))
+        .collect();
+    let line_index: HashMap<&LineId, (u32, u32)> = data
+        .lines
+        .iter()
+        .map(|episode_line| {
+            (
+                &episode_line.id,
+                (episode_line.episode, episode_line.line.end_ms),
+            )
+        })
+        .collect();
+
+    insert_characters(transaction, &approved, &line_index)?;
+    let content = insert_approved_content(transaction, &approved, &line_index)?;
+    insert_episode_speakers(transaction, &data.lines, &content)?;
+    insert_suggestions(transaction, data)
+}
+
+fn insert_sources(transaction: &Transaction<'_>, records: &[Source]) -> Result<()> {
+    for record in records {
         transaction.execute(
             "INSERT INTO sources VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 record.id.0,
                 enum_text(&record.kind),
                 record.path.to_string_lossy().into_owned(),
-                record.size as i64,
+                record.size.cast_signed(),
                 record.episode,
                 record.language.as_ref().map(enum_text),
             ],
         )?;
     }
+    Ok(())
+}
 
-    for episode_line in &data.lines {
+fn insert_lines(transaction: &Transaction<'_>, lines: &[EpisodeLine]) -> Result<()> {
+    for episode_line in lines {
         let line = &episode_line.line;
         transaction.execute(
             "INSERT INTO lines VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -186,28 +222,15 @@ fn write_all(transaction: &Transaction, data: &Data) -> Result<()> {
             ],
         )?;
     }
+    Ok(())
+}
 
-    let approved: Vec<&Suggestion> = data
-        .suggestions
-        .iter()
-        .filter(|suggestion| is_data(&data.reviews[&suggestion.id]))
-        .collect();
-    let line_index: HashMap<&LineId, (u32, u32)> = data
-        .lines
-        .iter()
-        .map(|episode_line| {
-            (
-                &episode_line.id,
-                (episode_line.episode, episode_line.line.end_ms),
-            )
-        })
-        .collect();
-
-    let mut labels: HashMap<String, Label> = HashMap::new();
-    let mut colors: HashMap<u32, CharacterId> = HashMap::new();
-    let mut line_speakers: HashMap<LineId, Vec<CharacterId>> = HashMap::new();
-
-    for suggestion in &approved {
+fn insert_characters(
+    transaction: &Transaction<'_>,
+    approved: &[&Suggestion],
+    line_index: &HashMap<&LineId, (u32, u32)>,
+) -> Result<()> {
+    for suggestion in approved {
         if let Content::Character {
             name,
             reading,
@@ -230,8 +253,20 @@ fn write_all(transaction: &Transaction, data: &Data) -> Result<()> {
             )?;
         }
     }
+    Ok(())
+}
 
-    for suggestion in &approved {
+fn insert_approved_content(
+    transaction: &Transaction<'_>,
+    approved: &[&Suggestion],
+    line_index: &HashMap<&LineId, (u32, u32)>,
+) -> Result<ApprovedContent> {
+    let mut content = ApprovedContent {
+        labels: HashMap::new(),
+        colors: HashMap::new(),
+        line_speakers: HashMap::new(),
+    };
+    for suggestion in approved {
         match &suggestion.content {
             Content::Label {
                 label,
@@ -242,7 +277,7 @@ fn write_all(transaction: &Transaction, data: &Data) -> Result<()> {
                     "INSERT INTO speaker_labels VALUES (?1, ?2, ?3)",
                     params![label, enum_text(kind), character],
                 )?;
-                labels.insert(
+                content.labels.insert(
                     label.clone(),
                     Label {
                         kind: *kind,
@@ -255,13 +290,15 @@ fn write_all(transaction: &Transaction, data: &Data) -> Result<()> {
                     "INSERT INTO speaker_colors VALUES (?1, ?2)",
                     params![color, character],
                 )?;
-                colors.insert(*color, CharacterId(character.clone()));
+                content
+                    .colors
+                    .insert(*color, CharacterId(character.clone()));
             }
             Content::LineSpeaker { line, characters } => {
                 if !line_index.contains_key(line) {
                     return Err(missing_line(&suggestion.id, line));
                 }
-                line_speakers.insert(
+                content.line_speakers.insert(
                     line.clone(),
                     characters.iter().cloned().map(CharacterId).collect(),
                 );
@@ -269,21 +306,36 @@ fn write_all(transaction: &Transaction, data: &Data) -> Result<()> {
             Content::Character { .. } => {}
         }
     }
+    Ok(content)
+}
 
+fn insert_episode_speakers(
+    transaction: &Transaction<'_>,
+    lines: &[EpisodeLine],
+    content: &ApprovedContent,
+) -> Result<()> {
     let mut episodes: BTreeMap<u32, Vec<(LineId, &ass::Line)>> = BTreeMap::new();
-    for episode_line in &data.lines {
+    for episode_line in lines {
         episodes
             .entry(episode_line.episode)
             .or_default()
             .push((episode_line.id.clone(), &episode_line.line));
     }
-    for lines in episodes.values() {
-        let speakers = speakers::resolve(lines, &labels, &colors, &line_speakers);
-        for ((line_id, _), speaker) in lines.iter().zip(speakers) {
+    for episode_lines in episodes.values() {
+        let speakers = speakers::resolve(
+            episode_lines,
+            &content.labels,
+            &content.colors,
+            &content.line_speakers,
+        );
+        for ((line_id, _), speaker) in episode_lines.iter().zip(speakers) {
             insert_speaker(transaction, line_id, &speaker)?;
         }
     }
+    Ok(())
+}
 
+fn insert_suggestions(transaction: &Transaction<'_>, data: &Data) -> Result<()> {
     for suggestion in &data.suggestions {
         let review = data.reviews[&suggestion.id];
         let prompt_id = suggestion.id.sort_key().0;
@@ -303,7 +355,7 @@ fn write_all(transaction: &Transaction, data: &Data) -> Result<()> {
 }
 
 /// Approved and not blocked. Only these suggestions become data.
-fn is_data(review: &Review) -> bool {
+fn is_data(review: Review) -> bool {
     review.status == Status::Approved && !review.blocked
 }
 
@@ -311,7 +363,7 @@ fn missing_line(suggestion: &SuggestionId, line: &LineId) -> anyhow::Error {
     anyhow!("approved suggestion {suggestion} uses line {line}, which is not in lines")
 }
 
-fn insert_speaker(transaction: &Transaction, line: &LineId, speaker: &Speaker) -> Result<()> {
+fn insert_speaker(transaction: &Transaction<'_>, line: &LineId, speaker: &Speaker) -> Result<()> {
     match speaker {
         Speaker::Unknown => {}
         Speaker::Nobody => {

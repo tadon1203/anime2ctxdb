@@ -60,7 +60,7 @@ pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
     serde_json::from_str(&text).with_context(|| format!("invalid JSON in {}", path.display()))
 }
 
-/// The text of a value that serializes as a snake_case string.
+/// The text of a value that serializes as a `snake_case` string.
 pub fn enum_text<T: Serialize>(value: &T) -> String {
     match serde_json::to_value(value).expect("an enum serializes to JSON") {
         serde_json::Value::String(text) => text,

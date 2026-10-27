@@ -225,18 +225,21 @@ mod tests {
 
     #[test]
     fn the_speaker_rules_run_in_order() {
-        let colors = HashMap::from([(0xFFFF00, character("c3"))]);
+        let colors = HashMap::from([(0x00FF_FF00, character("c3"))]);
         let line_speakers = HashMap::from([(id("s:4"), vec![character("c4")])]);
         let lines = [
             (id("s:0"), line(0, 2_000, None, Some("あんな"))),
             (id("s:1"), line(2_000, 3_000, None, Some("あんな・みくる"))),
             (id("s:2"), line(3_000, 4_000, None, Some("窓"))),
-            (id("s:3"), line(4_000, 5_000, Some(0xFFFF00), None)),
+            (id("s:3"), line(4_000, 5_000, Some(0x00FF_FF00), None)),
             (id("s:4"), line(5_000, 6_000, None, Some("あんな"))),
             (id("s:5"), line(6_000, 7_000, None, Some("未知"))),
             (id("s:6"), line(7_000, 8_000, None, None)),
             (id("s:7"), line(30_000, 31_000, None, None)),
-            (id("s:8"), line(31_000, 32_000, Some(0x123456), Some("注"))),
+            (
+                id("s:8"),
+                line(31_000, 32_000, Some(0x0012_3456), Some("注")),
+            ),
         ];
         let refs: Vec<(LineId, &ass::Line)> =
             lines.iter().map(|(id, line)| (id.clone(), line)).collect();

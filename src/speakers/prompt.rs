@@ -259,7 +259,7 @@ pub fn parse_answer(prompt: &Prompt, text: &str) -> Result<Vec<Suggestion>, Answ
     Ok(suggestions)
 }
 
-/// The JSON part of an answer: the first ```json block, or else the whole text.
+/// The JSON part of an answer: the first JSON code block, or else the whole text.
 pub fn json_part(text: &str) -> Option<&str> {
     const FENCE: &str = "```json";
     if let Some(start) = text.find(FENCE) {
@@ -358,9 +358,9 @@ mod tests {
 
     #[test]
     fn a_fenced_answer_and_a_plain_answer_give_the_same_suggestions() {
-        let plain = parse_answer(&prompt(), ANSWER).unwrap();
-        let fenced =
-            parse_answer(&prompt(), &format!("Here it is:\n```json\n{ANSWER}\n```")).unwrap();
+        let plain = parse_answer(&prompt(), ANSWER).expect("the plain answer parses");
+        let fenced = parse_answer(&prompt(), &format!("Here it is:\n```json\n{ANSWER}\n```"))
+            .expect("the fenced answer parses");
 
         assert_eq!(plain, fenced);
         assert_eq!(plain.len(), 4);
@@ -368,7 +368,7 @@ mod tests {
 
     #[test]
     fn new_characters_are_numbered_first_then_the_other_entries_in_order() {
-        let suggestions = parse_answer(&prompt(), ANSWER).unwrap();
+        let suggestions = parse_answer(&prompt(), ANSWER).expect("the answer parses");
 
         let ids: Vec<&str> = suggestions
             .iter()
@@ -389,7 +389,7 @@ mod tests {
     fn an_unknown_reference_is_an_error() {
         let answer = r#"{ "lines": [{ "line": "L2", "characters": ["C9"] }] }"#;
 
-        let error = parse_answer(&prompt(), answer).unwrap_err();
+        let error = parse_answer(&prompt(), answer).expect_err("C9 is unknown");
 
         assert!(matches!(error, AnswerError::UnknownRef(reference) if reference == "C9"));
     }
@@ -398,14 +398,14 @@ mod tests {
     fn a_new_character_needs_evidence() {
         let answer = r#"{ "new_characters": [{ "ref": "N1", "name": "x", "evidence": [] }] }"#;
 
-        let error = parse_answer(&prompt(), answer).unwrap_err();
+        let error = parse_answer(&prompt(), answer).expect_err("the evidence is missing");
 
         assert!(matches!(error, AnswerError::MissingEvidence(1)));
     }
 
     #[test]
     fn text_without_json_is_an_error() {
-        let error = parse_answer(&prompt(), "I cannot tell.").unwrap_err();
+        let error = parse_answer(&prompt(), "I cannot tell.").expect_err("there is no JSON");
 
         assert!(matches!(error, AnswerError::NoJson));
     }
@@ -416,7 +416,7 @@ mod tests {
             lines: vec![PromptLine {
                 id: LineId("s:0".to_string()),
                 start_ms: 61_000,
-                color: Some(0xFFFF00),
+                color: Some(0x00FF_FF00),
                 label: Some("あんな".to_string()),
                 text: "わたし".to_string(),
                 speaker: Speaker::Characters(

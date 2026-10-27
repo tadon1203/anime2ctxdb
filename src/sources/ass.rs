@@ -217,7 +217,7 @@ mod tests {
             &dialogue("0:00:01.00", "0:00:02.00", "main"),
         ]);
 
-        let lines = parse(&text).unwrap();
+        let lines = parse(&text).expect("the subtitle parses");
 
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].text, "main");
@@ -231,7 +231,7 @@ mod tests {
             r"{\an8}first\Nsecond\hthird",
         )]);
 
-        let lines = parse(&text).unwrap();
+        let lines = parse(&text).expect("the subtitle parses");
 
         assert_eq!(lines[0].text, "first second third");
     }
@@ -240,7 +240,7 @@ mod tests {
     fn offscreen_marks_are_removed_and_set_the_flag() {
         let text = document(&[&dialogue("0:00:01.00", "0:00:02.00", "⚟ボタン⚞")]);
 
-        let lines = parse(&text).unwrap();
+        let lines = parse(&text).expect("the subtitle parses");
 
         assert_eq!(lines[0].text, "ボタン");
         assert!(lines[0].offscreen);
@@ -253,7 +253,7 @@ mod tests {
             &dialogue("0:00:03.00", "0:00:04.00", "わたし（笑）"),
         ]);
 
-        let lines = parse(&text).unwrap();
+        let lines = parse(&text).expect("the subtitle parses");
 
         assert_eq!(lines[0].speaker_label.as_deref(), Some("あんな"));
         assert_eq!(lines[0].text, "わたし");
@@ -268,7 +268,7 @@ mod tests {
             &dialogue("0:00:01.00", "0:00:02.00", "持つ"),
         ]);
 
-        let lines = parse(&text).unwrap();
+        let lines = parse(&text).expect("the subtitle parses");
 
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].text, "わたし 持つ");
@@ -283,7 +283,7 @@ mod tests {
             &dialogue("0:00:01.00", "0:00:02.00", "（みくる）two"),
         ]);
 
-        let lines = parse(&text).unwrap();
+        let lines = parse(&text).expect("the subtitle parses");
 
         assert_eq!(lines.len(), 2);
     }
@@ -292,9 +292,9 @@ mod tests {
     fn ass_color_is_converted_from_bgr_to_rgb() {
         let text = document(&[&dialogue("0:00:01.00", "0:00:02.00", r"{\c&H0000FFFF}黄")]);
 
-        let lines = parse(&text).unwrap();
+        let lines = parse(&text).expect("the subtitle parses");
 
-        assert_eq!(lines[0].color, Some(0xFFFF00));
+        assert_eq!(lines[0].color, Some(0x00FF_FF00));
     }
 
     #[test]
@@ -305,7 +305,7 @@ mod tests {
             &dialogue("0:00:01.00", "0:00:03.00", "second"),
         ]);
 
-        let lines = parse(&text).unwrap();
+        let lines = parse(&text).expect("the subtitle parses");
 
         let texts: Vec<&str> = lines.iter().map(|line| line.text.as_str()).collect();
         assert_eq!(texts, ["first", "second", "late"]);
@@ -315,7 +315,7 @@ mod tests {
     fn a_time_is_read_in_milliseconds() {
         let text = document(&[&dialogue("1:02:03.45", "1:02:04.00", "t")]);
 
-        let lines = parse(&text).unwrap();
+        let lines = parse(&text).expect("the subtitle parses");
 
         assert_eq!(lines[0].start_ms, 3_723_450);
         assert_eq!(lines[0].end_ms, 3_724_000);
@@ -323,7 +323,7 @@ mod tests {
 
     #[test]
     fn a_file_without_events_is_an_error() {
-        let error = parse("[Script Info]\nTitle: x\n").unwrap_err();
+        let error = parse("[Script Info]\nTitle: x\n").expect_err("there is no events section");
 
         assert!(matches!(error, AssError::MissingEventsSection));
     }
@@ -332,7 +332,7 @@ mod tests {
     fn a_broken_dialogue_names_its_line() {
         let text = document(&["Dialogue: broken"]);
 
-        let error = parse(&text).unwrap_err();
+        let error = parse(&text).expect_err("the subtitle is invalid");
 
         assert!(matches!(
             error,
@@ -342,11 +342,12 @@ mod tests {
 
     #[test]
     fn the_sample_files_parse() {
-        let raw = parse(include_str!("../../testdata/raw.ass")).unwrap();
-        let chinese = parse(include_str!("../../testdata/chinese.ass")).unwrap();
+        let raw = parse(include_str!("../../testdata/raw.ass")).expect("raw.ass parses");
+        let chinese =
+            parse(include_str!("../../testdata/chinese.ass")).expect("chinese.ass parses");
 
-        assert!(!raw.is_empty());
-        assert!(!chinese.is_empty());
+        assert_ne!(raw.len(), 0);
+        assert_ne!(chinese.len(), 0);
         assert!(raw.iter().all(|line| line.text != "あけち"));
     }
 }
