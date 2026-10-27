@@ -78,6 +78,32 @@ impl eframe::App for App {
     }
 }
 
+/// Sets the text sizes and the spacing. The defaults are too small to read and to click.
+pub fn set_sizes(ctx: &egui::Context) {
+    ctx.global_style_mut(|style| {
+        use egui::{FontFamily::Monospace, FontFamily::Proportional, FontId, TextStyle, vec2};
+        style.spacing.item_spacing = vec2(12.0, 8.0);
+        style.spacing.button_padding = vec2(12.0, 6.0);
+        style.spacing.interact_size = vec2(48.0, 30.0);
+        style.spacing.indent = 24.0;
+        style
+            .text_styles
+            .insert(TextStyle::Small, FontId::new(14.0, Proportional));
+        style
+            .text_styles
+            .insert(TextStyle::Body, FontId::new(16.0, Proportional));
+        style
+            .text_styles
+            .insert(TextStyle::Button, FontId::new(16.0, Proportional));
+        style
+            .text_styles
+            .insert(TextStyle::Heading, FontId::new(22.0, Proportional));
+        style
+            .text_styles
+            .insert(TextStyle::Monospace, FontId::new(16.0, Monospace));
+    });
+}
+
 impl App {
     fn busy(&self) -> bool {
         self.job.is_some()

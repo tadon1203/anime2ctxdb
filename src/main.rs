@@ -39,8 +39,14 @@ fn main() -> Result<()> {
 
     eframe::run_native(
         "anime2ctxdb",
-        eframe::NativeOptions::default(),
-        Box::new(|_creation| Ok(Box::new(app::App::default()))),
+        eframe::NativeOptions {
+            renderer: eframe::Renderer::Wgpu,
+            ..Default::default()
+        },
+        Box::new(|creation| {
+            app::set_sizes(&creation.egui_ctx);
+            Ok(Box::new(app::App::default()))
+        }),
     )?;
     drop(lock_file);
     Ok(())
