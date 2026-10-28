@@ -47,10 +47,14 @@ fn main() -> Result<()> {
         "anime2ctxdb",
         eframe::NativeOptions {
             renderer: eframe::Renderer::Wgpu,
+            viewport: eframe::egui::ViewportBuilder::default()
+                .with_inner_size([1100.0, 760.0])
+                .with_min_inner_size([800.0, 500.0]),
             ..Default::default()
         },
         Box::new(|creation| {
-            app::set_sizes(&creation.egui_ctx);
+            app::set_fonts(&creation.egui_ctx);
+            app::set_style(&creation.egui_ctx);
             Ok(Box::new(app::App::new(series_root)))
         }),
     )?;
