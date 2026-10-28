@@ -1,4 +1,4 @@
-use anime2ctxdb::{Prompt, PromptId, PromptKind, PromptRow, Series, app_data_dir};
+use anime2ctxdb::{PromptKind, Series, app_data_dir};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::fs;
@@ -34,12 +34,14 @@ enum Command {
         #[command(subcommand)]
         command: AnswerCommand,
     },
+    /// Lists the episodes that have a Ja subtitle, and whether each has an answer of each kind.
+    Status,
 }
 
 #[derive(Debug, Subcommand)]
 enum PromptCommand {
-    /// Writes a prompt for one or more episodes and prints its ID.
-    Create {
+    /// Prints the prompt for one or more episodes. The prompt is not saved.
+    Show {
         #[arg(long)]
         kind: KindArg,
 
@@ -47,20 +49,22 @@ enum PromptCommand {
         #[arg(long, value_delimiter = ',', required = true)]
         episodes: Vec<u32>,
     },
-    /// Lists the prompts, one per line: ID, kind, episodes, and state.
-    List {
-        /// Show only the prompts that have no answer.
-        #[arg(long)]
-        pending: bool,
-    },
-    /// Prints the text of one prompt.
-    Show { id: u32 },
 }
 
 #[derive(Debug, Subcommand)]
 enum AnswerCommand {
-    /// Saves the answer to a prompt. The answer is read from FILE, or from stdin if FILE is missing.
-    Submit { id: u32, file: Option<PathBuf> },
+    /// Saves the answer to the prompt for one or more episodes. The answer is read from FILE, or
+    /// from stdin if FILE is missing.
+    Submit {
+        #[arg(long)]
+        kind: KindArg,
+
+        /// The episode numbers, such as 1,2,3. They must be the ones that the prompt had.
+        #[arg(long, value_delimiter = ',', required = true)]
+        episodes: Vec<u32>,
+
+        file: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -98,25 +102,14 @@ fn run() -> Result<()> {
     match cli.command {
         Command::Prompt { command } => prompt(&series, command),
         Command::Answer { command } => answer(&series, command),
+        Command::Status => status(&series),
     }
 }
 
 fn prompt(series: &Series, command: PromptCommand) -> Result<()> {
     match command {
-        PromptCommand::Create { kind, episodes } => {
-            let prompt = series.create_prompt(kind.into(), &episodes)?;
-            println!("{}", prompt.id);
-        }
-        PromptCommand::List { pending } => {
-            for row in series.prompts()? {
-                if pending && row.answered {
-                    continue;
-                }
-                println!("{}", list_line(&row));
-            }
-        }
-        PromptCommand::Show { id } => {
-            let prompt: Prompt = series.prompt(PromptId(id))?;
+        PromptCommand::Show { kind, episodes } => {
+            let prompt = series.prompt(kind.into(), &episodes)?;
             print!("{}", prompt.text);
         }
     }
@@ -125,11 +118,32 @@ fn prompt(series: &Series, command: PromptCommand) -> Result<()> {
 
 fn answer(series: &Series, command: AnswerCommand) -> Result<()> {
     match command {
-        AnswerCommand::Submit { id, file } => {
+        AnswerCommand::Submit {
+            kind,
+            episodes,
+            file,
+        } => {
             let text = read_answer(file.as_deref())?;
-            let count = series.submit_answer(PromptId(id), &text)?;
-            println!("saved {count} suggestions for prompt {id}");
+            let count = series.submit_answer(kind.into(), &episodes, &text)?;
+            println!("saved {count} suggestions");
         }
+    }
+    Ok(())
+}
+
+/// Prints one line for each episode that has a Ja subtitle: the episode, then the state of the
+/// speakers answer and of the story answer, separated by tabs.
+fn status(series: &Series) -> Result<()> {
+    let speakers = series.answered_episodes(PromptKind::Speakers)?;
+    let story = series.answered_episodes(PromptKind::Story)?;
+    let state = |answered: bool| if answered { "answered" } else { "pending" };
+    for item in series.progress()?.iter().filter(|item| item.has_subtitle) {
+        println!(
+            "{}\tspeakers={}\tstory={}",
+            item.episode,
+            state(speakers.contains(&item.episode)),
+            state(story.contains(&item.episode))
+        );
     }
     Ok(())
 }
@@ -144,21 +158,4 @@ fn read_answer(file: Option<&Path>) -> Result<String> {
         .read_to_string(&mut text)
         .context("cannot read the answer from stdin")?;
     Ok(text)
-}
-
-/// One line of `prompt list`: the ID, the kind, the episodes, and the state, separated by tabs.
-fn list_line(row: &PromptRow) -> String {
-    let kind = match row.prompt.kind {
-        PromptKind::Speakers => "speakers",
-        PromptKind::Story => "story",
-    };
-    let episodes = row
-        .prompt
-        .episodes
-        .iter()
-        .map(u32::to_string)
-        .collect::<Vec<_>>()
-        .join(",");
-    let state = if row.answered { "answered" } else { "pending" };
-    format!("{}\t{kind}\t{episodes}\t{state}", row.prompt.id)
 }

@@ -1,26 +1,20 @@
 pub mod speakers;
 pub mod story;
 
+use crate::files::read_json;
 use crate::model::{CHARACTER, Entity, EntityId, format_clock};
 use crate::sources::ass::LineId;
 use crate::speakers::Speaker;
 use crate::suggestions::suggestion::{Evidence, Suggestion, SuggestionId};
-use serde::{Deserialize, Deserializer, Serialize};
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
-use std::fmt;
+use std::fs;
+use std::path::Path;
 use thiserror::Error;
 
 pub use speakers::SpeakersInput;
 pub use story::{PromptFact, StoryInput};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct PromptId(pub u32);
-
-impl fmt::Display for PromptId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -29,31 +23,49 @@ pub enum PromptKind {
     Story,
 }
 
-/// A prompt file. The app writes it, and the user copies `text` to an AI chat.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A prompt for one or more episodes. The app makes it when it is needed and does not save it.
+/// The user copies `text` to an AI chat.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prompt {
-    pub id: PromptId,
     pub kind: PromptKind,
-    /// The episodes of the transcript, in order. An old prompt file has one number, `episode`.
-    #[serde(alias = "episode", deserialize_with = "episodes_from_file")]
+    /// The episodes of the transcript, in order.
     pub episodes: Vec<u32>,
     pub text: String,
-    /// Short reference (`L1`, `C1`, `T1`) to the real ID.
+    /// Short reference (`L1`, `C2-1`, `T3-1`) to the real ID. A line reference is the number of
+    /// the line in the transcript. An entity reference has the ID of the entity, so it does not
+    /// change when the user approves another entity.
     pub refs: BTreeMap<String, String>,
 }
 
-/// Reads the episodes of a prompt file: a list, or the one number of an old file.
-fn episodes_from_file<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u32>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Episodes {
-        One(u32),
-        Many(Vec<u32>),
+/// An answer file, `answers/<n>.json`. The app writes it when the user submits an answer. It holds
+/// the suggestions of the answer, with real IDs, so the app does not need the prompt again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnswerFile {
+    pub kind: PromptKind,
+    pub episodes: Vec<u32>,
+    pub suggestions: Vec<Suggestion>,
+}
+
+/// Reads the answer files in `answers/` with their numbers, in number order.
+pub fn read_answers(series_dir: &Path) -> Result<Vec<(u32, AnswerFile)>> {
+    let directory = series_dir.join("answers");
+    let mut answers = Vec::new();
+    for entry in
+        fs::read_dir(&directory).with_context(|| format!("cannot read {}", directory.display()))?
+    {
+        let path = entry
+            .with_context(|| format!("cannot read {}", directory.display()))?
+            .path();
+        let number = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .and_then(|stem| stem.parse::<u32>().ok());
+        if let Some(number) = number.filter(|_| path.extension().is_some_and(|ext| ext == "json")) {
+            answers.push((number, read_json::<AnswerFile>(&path)?));
+        }
     }
-    Ok(match Episodes::deserialize(deserializer)? {
-        Episodes::One(episode) => vec![episode],
-        Episodes::Many(episodes) => episodes,
-    })
+    answers.sort_by_key(|(number, _)| *number);
+    Ok(answers)
 }
 
 pub struct PromptLine {
@@ -84,11 +96,16 @@ pub enum AnswerError {
 }
 
 /// Reads the answer and makes its suggestions. The kind of the prompt picks the parser.
-pub fn parse_answer(prompt: &Prompt, text: &str) -> Result<Vec<Suggestion>, AnswerError> {
+/// `number` is the number of the answer. It starts the ID of each suggestion.
+pub fn parse_answer(
+    prompt: &Prompt,
+    number: u32,
+    text: &str,
+) -> Result<Vec<Suggestion>, AnswerError> {
     let json = json_part(text).ok_or(AnswerError::NoJson)?;
     match prompt.kind {
-        PromptKind::Speakers => speakers::parse(prompt, json),
-        PromptKind::Story => story::parse(prompt, json),
+        PromptKind::Speakers => speakers::parse(prompt, number, json),
+        PromptKind::Story => story::parse(prompt, number, json),
     }
 }
 
@@ -105,25 +122,26 @@ pub fn json_part(text: &str) -> Option<&str> {
 
 /// Numbers the suggestions of one answer, from 1, in the order that they are made.
 struct Numbering {
-    prompt: PromptId,
+    answer: u32,
     position: usize,
 }
 
 impl Numbering {
-    fn new(prompt: PromptId) -> Numbering {
+    fn new(answer: u32) -> Numbering {
         Numbering {
-            prompt,
+            answer,
             position: 0,
         }
     }
 
     fn next_id(&mut self) -> SuggestionId {
         self.position += 1;
-        SuggestionId(format!("{}-{}", self.prompt, self.position))
+        SuggestionId(format!("{}-{}", self.answer, self.position))
     }
 }
 
-/// Writes the entity list of a prompt. A character gets a `C` reference and any other entity gets a `T` reference.
+/// Writes the entity list of a prompt. A character gets a `C` reference and any other entity gets
+/// a `T` reference. The reference has the ID of the entity, such as `C2-1`.
 ///
 /// Returns the list lines, and the short reference of each entity by its ID.
 fn entity_list(
@@ -132,15 +150,11 @@ fn entity_list(
 ) -> (Vec<String>, HashMap<String, String>) {
     let mut lines = Vec::new();
     let mut entity_refs = HashMap::new();
-    let mut characters = 0;
-    let mut others = 0;
     for entity in entities {
         let (reference, detail) = if entity.kind == CHARACTER {
-            characters += 1;
-            (format!("C{characters}"), entity.reading.clone())
+            (format!("C{}", entity.id.0), entity.reading.clone())
         } else {
-            others += 1;
-            (format!("T{others}"), Some(entity.kind.clone()))
+            (format!("T{}", entity.id.0), Some(entity.kind.clone()))
         };
         let detail = detail
             .map(|detail| format!(" ({detail})"))
@@ -266,24 +280,6 @@ fn list_or_none(items: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_prompt_file_with_one_episode_number_still_loads() {
-        let json = r#"{ "id": 1, "kind": "story", "episode": 3, "text": "", "refs": {} }"#;
-
-        let prompt: Prompt = serde_json::from_str(json).expect("the old file loads");
-
-        assert_eq!(prompt.episodes, [3]);
-    }
-
-    #[test]
-    fn a_prompt_file_with_a_list_of_episodes_loads() {
-        let json = r#"{ "id": 1, "kind": "story", "episodes": [1, 2], "text": "", "refs": {} }"#;
-
-        let prompt: Prompt = serde_json::from_str(json).expect("the file loads");
-
-        assert_eq!(prompt.episodes, [1, 2]);
-    }
 
     #[test]
     fn episodes_are_named_in_words() {

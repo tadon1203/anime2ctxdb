@@ -1,6 +1,6 @@
 use super::{
-    AnswerError, Numbering, Prompt, PromptId, PromptKind, PromptLine, entity_list, entity_ref,
-    episodes_text, evidence_of, line_ref, list_or_none, transcript,
+    AnswerError, Numbering, Prompt, PromptKind, PromptLine, entity_list, entity_ref, episodes_text,
+    evidence_of, line_ref, list_or_none, transcript,
 };
 use crate::model::{CHARACTER, Entity, EntityId};
 use crate::speakers::LabelKind;
@@ -14,8 +14,8 @@ const FORMAT: &str = r##"{
   "new_characters": [{ "ref": "N1", "name": "...", "reading": "...", "evidence": ["L4"] }],
   "labels": [{ "label": "...", "kind": "character", "character": "N1" },
              { "label": "...", "kind": "sound" }],
-  "colors": [{ "color": "#FFFF00", "character": "C1" }],
-  "lines": [{ "line": "L88", "characters": ["C2"] },
+  "colors": [{ "color": "#FFFF00", "character": "C1-2" }],
+  "lines": [{ "line": "L88", "characters": ["C3-1"] },
             { "line": "L90", "characters": [] }]
 }"##;
 
@@ -81,8 +81,9 @@ fn parse_color<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Err
         .map_err(|_| serde::de::Error::custom(format!("invalid color {text}")))
 }
 
-/// Builds a Speakers prompt. The short references are `L1` for lines and `C1` for characters, in order.
-pub fn make(id: PromptId, episodes: &[u32], input: &SpeakersInput) -> Prompt {
+/// Builds a Speakers prompt. The short references are `L1` for lines, in order, and `C2-1` for
+/// characters, with the ID of the character.
+pub fn make(episodes: &[u32], input: &SpeakersInput) -> Prompt {
     let mut refs = BTreeMap::new();
     let (character_lines, entity_refs) = entity_list(&input.entities, &mut refs);
     let transcript_lines = transcript(&input.lines, &entity_refs, &mut refs);
@@ -101,7 +102,6 @@ pub fn make(id: PromptId, episodes: &[u32], input: &SpeakersInput) -> Prompt {
         .replace("{{format}}", FORMAT);
 
     Prompt {
-        id,
         kind: PromptKind::Speakers,
         episodes: episodes.to_vec(),
         text,
@@ -110,9 +110,13 @@ pub fn make(id: PromptId, episodes: &[u32], input: &SpeakersInput) -> Prompt {
 }
 
 /// Makes the suggestions of a Speakers answer. A new character `N1` becomes the suggestion of its own.
-pub(super) fn parse(prompt: &Prompt, json: &str) -> Result<Vec<Suggestion>, AnswerError> {
+pub(super) fn parse(
+    prompt: &Prompt,
+    number: u32,
+    json: &str,
+) -> Result<Vec<Suggestion>, AnswerError> {
     let answer: Answer = serde_json::from_str(json)?;
-    let mut numbering = Numbering::new(prompt.id);
+    let mut numbering = Numbering::new(number);
     let mut suggestions = Vec::new();
 
     let mut new_refs: HashMap<String, EntityId> = HashMap::new();
@@ -188,14 +192,13 @@ mod tests {
 
     fn prompt() -> Prompt {
         Prompt {
-            id: PromptId(3),
             kind: PromptKind::Speakers,
             episodes: vec![1],
             text: String::new(),
             refs: BTreeMap::from([
                 ("L1".to_string(), "s:0".to_string()),
                 ("L2".to_string(), "s:1".to_string()),
-                ("C1".to_string(), "2-1".to_string()),
+                ("C2-1".to_string(), "2-1".to_string()),
             ]),
         }
     }
@@ -203,16 +206,20 @@ mod tests {
     const ANSWER: &str = r##"{
       "new_characters": [{ "ref": "N1", "name": "明智あんな", "evidence": ["L1"] }],
       "labels": [{ "label": "あんな", "kind": "character", "character": "N1" }],
-      "colors": [{ "color": "#FFFF00", "character": "C1" }],
+      "colors": [{ "color": "#FFFF00", "character": "C2-1" }],
       "lines": [{ "line": "L2", "characters": ["N1"] }]
     }"##;
 
     #[test]
     fn a_fenced_answer_and_a_plain_answer_give_the_same_suggestions() {
-        let plain = super::super::parse_answer(&prompt(), ANSWER).expect("the plain answer parses");
-        let fenced =
-            super::super::parse_answer(&prompt(), &format!("Here it is:\n```json\n{ANSWER}\n```"))
-                .expect("the fenced answer parses");
+        let plain =
+            super::super::parse_answer(&prompt(), 3, ANSWER).expect("the plain answer parses");
+        let fenced = super::super::parse_answer(
+            &prompt(),
+            3,
+            &format!("Here it is:\n```json\n{ANSWER}\n```"),
+        )
+        .expect("the fenced answer parses");
 
         assert_eq!(plain, fenced);
         assert_eq!(plain.len(), 4);
@@ -220,7 +227,8 @@ mod tests {
 
     #[test]
     fn new_characters_are_numbered_first_then_the_other_entries_in_order() {
-        let suggestions = super::super::parse_answer(&prompt(), ANSWER).expect("the answer parses");
+        let suggestions =
+            super::super::parse_answer(&prompt(), 3, ANSWER).expect("the answer parses");
 
         let ids: Vec<&str> = suggestions
             .iter()
@@ -239,7 +247,8 @@ mod tests {
 
     #[test]
     fn a_new_character_is_an_entity_of_kind_character() {
-        let suggestions = super::super::parse_answer(&prompt(), ANSWER).expect("the answer parses");
+        let suggestions =
+            super::super::parse_answer(&prompt(), 3, ANSWER).expect("the answer parses");
 
         assert!(matches!(
             &suggestions[0].content,
@@ -251,7 +260,7 @@ mod tests {
     fn an_unknown_reference_is_an_error() {
         let answer = r#"{ "lines": [{ "line": "L2", "characters": ["C9"] }] }"#;
 
-        let error = super::super::parse_answer(&prompt(), answer).expect_err("C9 is unknown");
+        let error = super::super::parse_answer(&prompt(), 3, answer).expect_err("C9 is unknown");
 
         assert!(matches!(error, AnswerError::UnknownRef(reference) if reference == "C9"));
     }
@@ -261,7 +270,7 @@ mod tests {
         let answer = r#"{ "new_characters": [{ "ref": "N1", "name": "x", "evidence": [] }] }"#;
 
         let error =
-            super::super::parse_answer(&prompt(), answer).expect_err("the evidence is missing");
+            super::super::parse_answer(&prompt(), 3, answer).expect_err("the evidence is missing");
 
         assert!(matches!(
             error,
@@ -274,8 +283,8 @@ mod tests {
 
     #[test]
     fn text_without_json_is_an_error() {
-        let error =
-            super::super::parse_answer(&prompt(), "I cannot tell.").expect_err("there is no JSON");
+        let error = super::super::parse_answer(&prompt(), 3, "I cannot tell.")
+            .expect_err("there is no JSON");
 
         assert!(matches!(error, AnswerError::NoJson));
     }
@@ -305,20 +314,21 @@ mod tests {
             colors: vec![],
         };
 
-        let prompt = make(PromptId(4), &[1], &input);
+        let prompt = make(&[1], &input);
 
         assert!(
             prompt
                 .text
-                .contains("L1 E1 01:01 #FFFF00 （あんな） わたし [C1]")
+                .contains("L1 E1 01:01 #FFFF00 （あんな） わたし [C2-1]")
         );
         assert_eq!(prompt.refs["L1"], "s:0");
-        assert_eq!(prompt.refs["C1"], "2-1");
+        assert_eq!(prompt.refs["C2-1"], "2-1");
     }
 
     #[test]
     fn evidence_is_kept_in_order() {
-        let suggestions = super::super::parse_answer(&prompt(), ANSWER).expect("the answer parses");
+        let suggestions =
+            super::super::parse_answer(&prompt(), 3, ANSWER).expect("the answer parses");
 
         assert_eq!(
             suggestions[0].content,

@@ -1,10 +1,10 @@
-use crate::files::{enum_from_text, enum_text, read_json};
+use crate::files::{enum_from_text, enum_text};
 use crate::model::{CHARACTER, Entity, EntityId, Position, format_clock};
 use crate::package::{PackageFact, PackageInput, PackageLine, PackageScene};
 use crate::sources::ass::{self, LineId};
 use crate::sources::{self, Language, Source, SourceId, SourceKind};
 use crate::speakers::{self, Label, Speaker, SpeakerMethod};
-use crate::suggestions::prompt::{self, Prompt, PromptFact, PromptLine, SpeakersInput, StoryInput};
+use crate::suggestions::prompt::{self, PromptFact, PromptLine, SpeakersInput, StoryInput};
 use crate::suggestions::suggestion::{self, Content, Review, Status, Suggestion, SuggestionId};
 use anyhow::{Context, Result, anyhow, bail};
 use rusqlite::{Connection, OpenFlags, Row, Transaction, params};
@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The version of the tables in `schema.sql`. A different version means a full rebuild.
-pub const SCHEMA_VERSION: i32 = 3;
+pub const SCHEMA_VERSION: i32 = 4;
 
 const SCHEMA: &str = include_str!("schema.sql");
 
@@ -106,18 +106,8 @@ fn load(series_dir: &Path) -> Result<Data> {
     let decisions = suggestion::read_decisions(series_dir)?;
 
     let mut suggestions = Vec::new();
-    for prompt in read_prompts(series_dir)? {
-        let answer_path = series_dir
-            .join("answers")
-            .join(format!("{}.json", prompt.id));
-        if !answer_path.exists() {
-            continue;
-        }
-        let text = fs::read_to_string(&answer_path)
-            .with_context(|| format!("cannot read {}", answer_path.display()))?;
-        let parsed = prompt::parse_answer(&prompt, &text)
-            .with_context(|| format!("invalid answer {}", prompt.id))?;
-        suggestions.extend(parsed);
+    for (_, answer) in prompt::read_answers(series_dir)? {
+        suggestions.extend(answer.suggestions);
     }
     let reviews = suggestion::reviews(&suggestions, &decisions);
 
@@ -150,27 +140,6 @@ fn load(series_dir: &Path) -> Result<Data> {
         suggestions,
         reviews,
     })
-}
-
-/// The prompt files, in ID order.
-fn read_prompts(series_dir: &Path) -> Result<Vec<Prompt>> {
-    let directory = series_dir.join("prompts");
-    let mut prompts = Vec::new();
-    for entry in
-        fs::read_dir(&directory).with_context(|| format!("cannot read {}", directory.display()))?
-    {
-        let path = entry
-            .with_context(|| format!("cannot read {}", directory.display()))?
-            .path();
-        if path
-            .extension()
-            .is_some_and(|extension| extension == "json")
-        {
-            prompts.push(read_json::<Prompt>(&path)?);
-        }
-    }
-    prompts.sort_by_key(|prompt| prompt.id);
-    Ok(prompts)
 }
 
 fn write_all(transaction: &Transaction<'_>, data: &Data) -> Result<()> {
@@ -444,12 +413,12 @@ fn insert_episode_speakers(
 fn insert_suggestions(transaction: &Transaction<'_>, data: &Data) -> Result<()> {
     for suggestion in &data.suggestions {
         let review = data.reviews[&suggestion.id];
-        let prompt_id = suggestion.id.sort_key().0;
+        let answer_id = suggestion.id.sort_key().0;
         transaction.execute(
             "INSERT INTO suggestions VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 suggestion.id.0,
-                prompt_id,
+                answer_id,
                 enum_text(&suggestion.content.kind()),
                 enum_text(&review.status),
                 review.blocked,

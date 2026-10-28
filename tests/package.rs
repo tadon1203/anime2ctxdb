@@ -59,10 +59,10 @@ fn story_answer(transcript: &str) -> String {
 fn story_series(root: &std::path::Path) -> Series {
     let series = series_with_episodes(root, 1);
     let prompt = series
-        .create_prompt(PromptKind::Story, &[1])
-        .expect("the prompt is created");
+        .prompt(PromptKind::Story, &[1])
+        .expect("the prompt is made");
     series
-        .submit_answer(prompt.id, &story_answer(&prompt.text))
+        .submit_answer(PromptKind::Story, &[1], &story_answer(&prompt.text))
         .expect("the answer is submitted");
     approve_all_pending(&series);
     series

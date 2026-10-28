@@ -4,17 +4,17 @@ pub use index::EpisodeProgress;
 
 use index::Index;
 
-use crate::files::{read_json, write_atomic};
+use crate::files::{enum_text, write_atomic};
 use crate::model::Position;
 use crate::package;
 use crate::sources::{self, Problem, Scan, Source, SourceId};
-use crate::suggestions::prompt::{self, AnswerError, Prompt, PromptId, PromptKind};
+use crate::suggestions::prompt::{self, AnswerFile, Prompt, PromptKind};
 use crate::suggestions::suggestion::{
     self, Action, Content, Decision, Status, Suggestion, SuggestionId, SuggestionKind,
 };
 use anyhow::{Context, Result, bail, ensure};
 use fs4::FileExt;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 
@@ -26,13 +26,7 @@ pub struct Series {
 }
 
 /// The files and directories that every series directory has.
-const SERIES_ENTRIES: [&str; 5] = [
-    "sources.jsonl",
-    "decisions.jsonl",
-    "sources",
-    "prompts",
-    "answers",
-];
+const SERIES_ENTRIES: [&str; 4] = ["sources.jsonl", "decisions.jsonl", "sources", "answers"];
 
 /// Checks that a new series can use the directory: it is missing or empty.
 fn check_new_dir(dir: &Path) -> Result<()> {
@@ -63,13 +57,6 @@ pub struct SuggestionRow {
     pub blocked: bool,
 }
 
-/// A prompt file and whether it has an answer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PromptRow {
-    pub prompt: Prompt,
-    pub answered: bool,
-}
-
 /// How many suggestions a call changed and how many it skipped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Decided {
@@ -77,7 +64,7 @@ pub struct Decided {
     pub skipped: usize,
 }
 
-/// How many sources a call removed and how many it kept because a prompt or an answer uses them.
+/// How many sources a call removed and how many it kept because an answer uses them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Removed {
     pub removed: usize,
@@ -104,7 +91,7 @@ impl Series {
     pub fn create(dir: &Path) -> Result<Series> {
         check_new_dir(dir)?;
         fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
-        for name in ["sources", "prompts", "answers"] {
+        for name in ["sources", "answers"] {
             let path = dir.join(name);
             fs::create_dir_all(&path)
                 .with_context(|| format!("cannot create {}", path.display()))?;
@@ -198,13 +185,13 @@ impl Series {
         sources::load(&self.dir)
     }
 
-    /// The sources in `ids` that a prompt or an answer uses. `remove_sources` keeps them.
+    /// The sources in `ids` that an answer uses. `remove_sources` keeps them.
     pub fn blocked_removals(&self, ids: &[SourceId]) -> Result<Vec<SourceId>> {
         sources::find_used(&self.dir, ids)
     }
 
-    /// Removes the sources in `ids` and the copies of their subtitles. A source that a prompt
-    /// or an answer uses stays. The original files stay too.
+    /// Removes the sources in `ids` and the copies of their subtitles. A source that an answer
+    /// uses stays. The original files stay too.
     pub fn remove_sources(&self, ids: &[SourceId]) -> Result<Removed> {
         let _lock = write_lock(&self.dir)?;
         let blocked = sources::find_used(&self.dir, ids)?;
@@ -337,96 +324,71 @@ impl Series {
         Ok(package::build(&input))
     }
 
-    /// Lists the prompt files by ID, and says which ones have an answer.
-    pub fn prompts(&self) -> Result<Vec<PromptRow>> {
-        let directory = self.dir.join("prompts");
-        let entries = fs::read_dir(&directory)
-            .with_context(|| format!("cannot read {}", directory.display()))?;
-        let mut rows = Vec::new();
-        for entry in entries {
-            let path = entry
-                .with_context(|| format!("cannot read {}", directory.display()))?
-                .path();
-            if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
-                let prompt: Prompt = read_json(&path)?;
-                let answered = self.answer_file(prompt.id).exists();
-                rows.push(PromptRow { prompt, answered });
-            }
-        }
-        rows.sort_by_key(|row| row.prompt.id);
-        Ok(rows)
-    }
-
-    /// Reads one prompt file.
-    pub fn prompt(&self, id: PromptId) -> Result<Prompt> {
-        read_json(&self.prompt_file(id))
-    }
-
-    /// Writes a new prompt file for one or more episodes. It does not rebuild the index.
-    pub fn create_prompt(&self, kind: PromptKind, episodes: &[u32]) -> Result<Prompt> {
-        let mut episodes = episodes.to_vec();
-        episodes.sort_unstable();
-        episodes.dedup();
-        ensure!(!episodes.is_empty(), "a prompt needs at least one episode");
-        let _lock = write_lock(&self.dir)?;
+    /// Makes the prompt for one or more episodes. Nothing is saved. The same series and episodes
+    /// give the same prompt, until the user approves or revokes a suggestion.
+    pub fn prompt(&self, kind: PromptKind, episodes: &[u32]) -> Result<Prompt> {
+        let episodes = sorted_episodes(episodes)?;
         let index = Index::open(&self.dir)?;
-        let id = self.next_prompt_id()?;
-        let prompt = match kind {
-            PromptKind::Speakers => {
-                prompt::speakers::make(id, &episodes, &index.speakers_input(&episodes)?)
-            }
-            PromptKind::Story => prompt::story::make(id, &episodes, &index.story_input(&episodes)?),
-        };
-        let path = self.prompt_file(id);
-        write_atomic(&path, &serde_json::to_string_pretty(&prompt)?)?;
-        Ok(prompt)
+        make_prompt(&index, kind, &episodes)
     }
 
-    /// Reads the answer, writes its JSON part, and rebuilds the index.
-    pub fn submit_answer(&self, prompt_id: PromptId, text: &str) -> Result<usize> {
+    /// The episodes that have an answer of this kind.
+    pub fn answered_episodes(&self, kind: PromptKind) -> Result<BTreeSet<u32>> {
+        Ok(prompt::read_answers(&self.dir)?
+            .into_iter()
+            .filter(|(_, answer)| answer.kind == kind)
+            .flat_map(|(_, answer)| answer.episodes)
+            .collect())
+    }
+
+    /// Reads the answer to the prompt for `episodes`, writes its suggestions to a new answer
+    /// file, and rebuilds the index. An episode can have one answer of each kind.
+    pub fn submit_answer(&self, kind: PromptKind, episodes: &[u32], text: &str) -> Result<usize> {
+        let episodes = sorted_episodes(episodes)?;
         let _lock = write_lock(&self.dir)?;
-        let answer_path = self.answer_file(prompt_id);
-        ensure!(
-            !answer_path.exists(),
-            "prompt {prompt_id} already has an answer"
-        );
-        let prompt_path = self.prompt_file(prompt_id);
-        let prompt: Prompt = read_json(&prompt_path)?;
-        let json = prompt::json_part(text).ok_or(AnswerError::NoJson)?;
-        let suggestions = prompt::parse_answer(&prompt, text)?;
-        write_atomic(&answer_path, json)?;
-        Index::rebuild(&self.dir)?;
-        Ok(suggestions.len())
-    }
-
-    fn prompt_file(&self, id: PromptId) -> PathBuf {
-        self.dir.join("prompts").join(format!("{id}.json"))
-    }
-
-    fn answer_file(&self, id: PromptId) -> PathBuf {
-        self.dir.join("answers").join(format!("{id}.json"))
-    }
-
-    /// The largest prompt ID in `prompts/` plus 1.
-    fn next_prompt_id(&self) -> Result<PromptId> {
-        let directory = self.dir.join("prompts");
-        let mut largest = 0;
-        for entry in fs::read_dir(&directory)
-            .with_context(|| format!("cannot read {}", directory.display()))?
-        {
-            let path = entry
-                .with_context(|| format!("cannot read {}", directory.display()))?
-                .path();
-            if let Some(number) = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .and_then(|stem| stem.parse::<u32>().ok())
-            {
-                largest = largest.max(number);
-            }
+        let answers = prompt::read_answers(&self.dir)?;
+        for episode in &episodes {
+            ensure!(
+                !answers
+                    .iter()
+                    .any(|(_, answer)| answer.kind == kind && answer.episodes.contains(episode)),
+                "episode {episode} already has a {} answer",
+                enum_text(&kind)
+            );
         }
-        Ok(PromptId(largest + 1))
+        let prompt = {
+            let index = Index::open(&self.dir)?;
+            make_prompt(&index, kind, &episodes)?
+        };
+        let number = answers.last().map_or(1, |(number, _)| number + 1);
+        let suggestions = prompt::parse_answer(&prompt, number, text)?;
+        let count = suggestions.len();
+        let file = AnswerFile {
+            kind,
+            episodes,
+            suggestions,
+        };
+        let path = self.dir.join("answers").join(format!("{number}.json"));
+        write_atomic(&path, &serde_json::to_string_pretty(&file)?)?;
+        Index::rebuild(&self.dir)?;
+        Ok(count)
     }
+}
+
+/// The episodes in order, with no repeat. A prompt needs at least one.
+fn sorted_episodes(episodes: &[u32]) -> Result<Vec<u32>> {
+    let mut episodes = episodes.to_vec();
+    episodes.sort_unstable();
+    episodes.dedup();
+    ensure!(!episodes.is_empty(), "a prompt needs at least one episode");
+    Ok(episodes)
+}
+
+fn make_prompt(index: &Index, kind: PromptKind, episodes: &[u32]) -> Result<Prompt> {
+    Ok(match kind {
+        PromptKind::Speakers => prompt::speakers::make(episodes, &index.speakers_input(episodes)?),
+        PromptKind::Story => prompt::story::make(episodes, &index.story_input(episodes)?),
+    })
 }
 
 /// Takes the write lock of the series in `dir`. The lock lasts until the returned file is dropped.

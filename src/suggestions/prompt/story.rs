@@ -1,6 +1,6 @@
 use super::{
-    AnswerError, Numbering, Prompt, PromptId, PromptKind, PromptLine, entity_list, entity_ref,
-    episodes_text, evidence_of, line_ref, list_or_none, transcript,
+    AnswerError, Numbering, Prompt, PromptKind, PromptLine, entity_list, entity_ref, episodes_text,
+    evidence_of, line_ref, list_or_none, transcript,
 };
 use crate::model::{Entity, EntityId, Position, format_clock};
 use crate::suggestions::suggestion::{Content, Suggestion};
@@ -11,7 +11,7 @@ const TEMPLATE: &str = include_str!("../../../prompts/story.md");
 
 const FORMAT: &str = r#"{
   "new_entities": [{ "ref": "N1", "kind": "place", "name": "...", "reading": "...", "evidence": ["L3"] }],
-  "facts": [{ "entities": ["C1", "N1"], "text": "...", "evidence": ["L12", "L15"] }],
+  "facts": [{ "entities": ["C1-2", "N1"], "text": "...", "evidence": ["L12", "L15"] }],
   "scenes": [{ "start": "L1", "end": "L40", "place": "N1", "summary": "..." }]
 }"#;
 
@@ -68,7 +68,7 @@ struct AnswerScene {
 }
 
 /// Builds a Story prompt for one or more episodes.
-pub fn make(id: PromptId, episodes: &[u32], input: &StoryInput) -> Prompt {
+pub fn make(episodes: &[u32], input: &StoryInput) -> Prompt {
     let mut refs = BTreeMap::new();
     let (entity_lines, entity_refs) = entity_list(&input.entities, &mut refs);
     let transcript_lines = transcript(&input.lines, &entity_refs, &mut refs);
@@ -82,7 +82,6 @@ pub fn make(id: PromptId, episodes: &[u32], input: &StoryInput) -> Prompt {
         .replace("{{format}}", FORMAT);
 
     Prompt {
-        id,
         kind: PromptKind::Story,
         episodes: episodes.to_vec(),
         text,
@@ -102,9 +101,13 @@ fn fact_text(fact: &PromptFact) -> String {
 }
 
 /// Makes the suggestions of a Story answer. The order is: new entities, facts, then scenes.
-pub(super) fn parse(prompt: &Prompt, json: &str) -> Result<Vec<Suggestion>, AnswerError> {
+pub(super) fn parse(
+    prompt: &Prompt,
+    number: u32,
+    json: &str,
+) -> Result<Vec<Suggestion>, AnswerError> {
     let answer: Answer = serde_json::from_str(json)?;
-    let mut numbering = Numbering::new(prompt.id);
+    let mut numbering = Numbering::new(number);
     let mut suggestions = Vec::new();
 
     let mut new_refs: HashMap<String, EntityId> = HashMap::new();
@@ -180,7 +183,6 @@ mod tests {
 
     fn prompt() -> Prompt {
         Prompt {
-            id: PromptId(5),
             kind: PromptKind::Story,
             episodes: vec![2],
             text: String::new(),
@@ -188,20 +190,20 @@ mod tests {
                 ("L1".to_string(), "s:0".to_string()),
                 ("L2".to_string(), "s:1".to_string()),
                 ("L3".to_string(), "s:2".to_string()),
-                ("C1".to_string(), "2-1".to_string()),
-                ("T1".to_string(), "3-1".to_string()),
+                ("C2-1".to_string(), "2-1".to_string()),
+                ("T3-1".to_string(), "3-1".to_string()),
             ]),
         }
     }
 
     const ANSWER: &str = r#"{
       "new_entities": [{ "ref": "N1", "kind": "place", "name": "教室", "evidence": ["L1"] }],
-      "facts": [{ "entities": ["C1", "N1"], "text": "t", "evidence": ["L2", "L3"] }],
+      "facts": [{ "entities": ["C2-1", "N1"], "text": "t", "evidence": ["L2", "L3"] }],
       "scenes": [{ "start": "L1", "end": "L3", "place": "N1", "summary": "s" }]
     }"#;
 
     fn answer(json: &str) -> Result<Vec<Suggestion>, AnswerError> {
-        super::super::parse_answer(&prompt(), json)
+        super::super::parse_answer(&prompt(), 5, json)
     }
 
     #[test]
@@ -229,7 +231,7 @@ mod tests {
     #[test]
     fn an_entity_reference_can_be_a_character_or_another_entity() {
         let suggestions = answer(
-            r#"{ "facts": [{ "entities": ["C1", "T1"], "text": "t", "evidence": ["L1"] }] }"#,
+            r#"{ "facts": [{ "entities": ["C2-1", "T3-1"], "text": "t", "evidence": ["L1"] }] }"#,
         )
         .expect("the answer parses");
 
@@ -303,7 +305,7 @@ mod tests {
             facts: vec![],
         };
 
-        let prompt = make(PromptId(6), &[1, 2], &input);
+        let prompt = make(&[1, 2], &input);
 
         assert_eq!(prompt.episodes, [1, 2]);
         assert!(prompt.text.contains("episodes 1, 2"));

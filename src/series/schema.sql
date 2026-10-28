@@ -65,7 +65,7 @@ CREATE TABLE line_speakers (
 );
 CREATE TABLE suggestions (
     id TEXT PRIMARY KEY,
-    prompt_id INTEGER NOT NULL,
+    answer_id INTEGER NOT NULL,
     kind TEXT NOT NULL,
     status TEXT NOT NULL,
     blocked INTEGER NOT NULL,

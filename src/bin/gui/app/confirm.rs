@@ -11,7 +11,7 @@ pub(super) enum Confirm {
     Leave(Option<PathBuf>),
     /// Approve every pending suggestion in the list.
     ApproveShown(Vec<SuggestionId>),
-    /// Remove saved sources. The ones in `blocked` stay, because a prompt or an answer uses them.
+    /// Remove saved sources. The ones in `blocked` stay, because an answer uses them.
     Remove {
         ids: Vec<SourceId>,
         blocked: Vec<SourceId>,
@@ -61,7 +61,7 @@ impl Confirm {
                 lines.push("The app removes its own copy. The original files stay.".to_string());
                 if !blocked.is_empty() {
                     lines.push(format!(
-                        "{} stay, because a prompt or an answer uses them.",
+                        "{} stay, because an answer uses them.",
                         count_of(blocked.len(), "source")
                     ));
                 }

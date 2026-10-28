@@ -7,23 +7,23 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
-/// `<PromptId>-<n>`, where `n` is the position in the answer, from 1.
+/// `<answer>-<n>`, where `<answer>` is the number of the answer file, and `n` is the position in the answer, from 1.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SuggestionId(pub String);
 
 impl SuggestionId {
-    /// The prompt number and the position. Sort by these two numbers, not by the text.
+    /// The answer number and the position. Sort by these two numbers, not by the text.
     ///
     /// # Panics
     ///
-    /// Panics when the ID does not have the form `<prompt>-<n>`.
+    /// Panics when the ID does not have the form `<answer>-<n>`.
     pub fn sort_key(&self) -> (u32, u32) {
-        let (prompt, position) = self
+        let (answer, position) = self
             .0
             .split_once('-')
-            .expect("a suggestion ID has the form <prompt>-<n>");
+            .expect("a suggestion ID has the form <answer>-<n>");
         (
-            prompt.parse().expect("the prompt part is a number"),
+            answer.parse().expect("the answer part is a number"),
             position.parse().expect("the position part is a number"),
         )
     }

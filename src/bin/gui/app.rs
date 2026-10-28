@@ -7,8 +7,8 @@ mod startup;
 mod suggestions_tab;
 
 use anime2ctxdb::{
-    Action, EpisodeProgress, Failure, Position, Prompt, PromptId, PromptKind, Scan, Series, Source,
-    SourceId, Status, SuggestionFilter, SuggestionId, SuggestionRow,
+    Action, EpisodeProgress, Failure, Position, Prompt, PromptKind, Scan, Series, Source, SourceId,
+    Status, SuggestionFilter, SuggestionId, SuggestionRow,
 };
 use anyhow::Result;
 use eframe::egui;
@@ -30,7 +30,6 @@ const COPIED_LIFETIME: Duration = Duration::from_millis(1500);
 /// The result of a job that runs on a worker thread.
 enum JobOutput {
     Scanned(Scan),
-    Prompt(Prompt),
     Package(String),
     Status(String),
 }
@@ -47,7 +46,8 @@ enum Tab {
 #[derive(Clone, Copy)]
 enum ClearTarget {
     Detected,
-    Answer,
+    /// The answer box of this kind.
+    Answer(PromptKind),
 }
 
 /// How far a scan is. A worker thread writes it. The UI reads it.
@@ -95,8 +95,23 @@ pub struct App {
     episode: Option<u32>,
     /// Every episode that is selected in the Prompts tab.
     selected: BTreeSet<u32>,
+    /// The kind of prompt that the Prompts tab shows.
+    prompt_kind: PromptKind,
+    /// The prompt for the selected episodes. The app makes it again when the kind, the selection,
+    /// or the data changes.
     prompt: Option<Prompt>,
-    answer: String,
+    /// Why the prompt could not be made.
+    prompt_error: Option<String>,
+    /// What `prompt` was made for: the kind, the episodes, and `data_version`.
+    prompt_key: Option<(PromptKind, Vec<u32>, u64)>,
+    /// Counts the reads of the views. A new number means that the data may have changed.
+    data_version: u64,
+    speakers_answer: String,
+    story_answer: String,
+    /// The episodes that have a speakers answer.
+    speakers_answered: BTreeSet<u32>,
+    /// The episodes that have a story answer.
+    story_answered: BTreeSet<u32>,
     package_episode: Option<u32>,
     package_time: String,
     /// Why the time in `package_time` is not valid. It shows next to the field.
@@ -136,8 +151,15 @@ impl App {
             progress: Vec::new(),
             episode: None,
             selected: BTreeSet::new(),
+            prompt_kind: PromptKind::Speakers,
             prompt: None,
-            answer: String::new(),
+            prompt_error: None,
+            prompt_key: None,
+            data_version: 0,
+            speakers_answer: String::new(),
+            story_answer: String::new(),
+            speakers_answered: BTreeSet::new(),
+            story_answered: BTreeSet::new(),
             package_episode: None,
             package_time: "00:00".to_string(),
             package_time_error: None,
@@ -343,10 +365,6 @@ impl App {
                 }
                 self.failures.extend(scan.failed);
             }
-            Ok(JobOutput::Prompt(prompt)) => {
-                self.status = "Prompt made. Copy it to an AI chat.".to_string();
-                self.prompt = Some(prompt);
-            }
             Ok(JobOutput::Package(text)) => {
                 self.status = "Package made. Copy it to an AI chat.".to_string();
                 self.package = Some(text);
@@ -357,7 +375,8 @@ impl App {
                         self.detected.clear();
                         self.failures.clear();
                     }
-                    Some(ClearTarget::Answer) => self.answer.clear(),
+                    Some(ClearTarget::Answer(PromptKind::Speakers)) => self.speakers_answer.clear(),
+                    Some(ClearTarget::Answer(PromptKind::Story)) => self.story_answer.clear(),
                     None => {}
                 }
                 self.status = message;
@@ -373,12 +392,15 @@ impl App {
             return;
         };
         match load_views(series, self.filter) {
-            Ok((saved, rows, progress)) => {
-                self.saved_base.clone_from(&saved);
-                self.saved_view.keep_saved(&saved);
-                self.saved = saved;
-                self.rows = rows;
-                self.progress = progress;
+            Ok(views) => {
+                self.saved_base.clone_from(&views.saved);
+                self.saved_view.keep_saved(&views.saved);
+                self.saved = views.saved;
+                self.rows = views.rows;
+                self.progress = views.progress;
+                self.speakers_answered = views.speakers_answered;
+                self.story_answered = views.story_answered;
+                self.data_version += 1;
                 if self.episode.is_none() {
                     self.episode = first_unfinished(&self.progress);
                     self.selected.extend(self.episode);
@@ -413,7 +435,10 @@ impl App {
         self.failures.clear();
         self.saved_view = SavedView::default();
         self.prompt = None;
-        self.answer.clear();
+        self.prompt_error = None;
+        self.prompt_key = None;
+        self.speakers_answer.clear();
+        self.story_answer.clear();
         self.episode = None;
         self.selected.clear();
         self.package_episode = None;
@@ -536,7 +561,7 @@ impl App {
         self.start(ctx, move || {
             let done = series.remove_sources(&ids)?;
             Ok(JobOutput::Status(format!(
-                "Removed {}, kept {} that a prompt or an answer uses.",
+                "Removed {}, kept {} that an answer uses.",
                 count_of(done.removed, "source"),
                 done.blocked
             )))
@@ -562,16 +587,6 @@ impl App {
         });
     }
 
-    /// Makes one prompt for all the episodes.
-    fn create_prompt(&mut self, ctx: &egui::Context, kind: PromptKind, episodes: Vec<u32>) {
-        let Some(series) = self.series.clone() else {
-            return;
-        };
-        self.start(ctx, move || {
-            series.create_prompt(kind, &episodes).map(JobOutput::Prompt)
-        });
-    }
-
     fn create_package(&mut self, ctx: &egui::Context, at: Position) {
         let Some(series) = self.series.clone() else {
             return;
@@ -581,15 +596,22 @@ impl App {
         });
     }
 
-    fn submit(&mut self, ctx: &egui::Context, prompt: PromptId, answer: String) {
+    fn submit(
+        &mut self,
+        ctx: &egui::Context,
+        kind: PromptKind,
+        episodes: Vec<u32>,
+        answer: String,
+    ) {
         let Some(series) = self.series.clone() else {
             return;
         };
-        self.clear_on_success = Some(ClearTarget::Answer);
+        self.clear_on_success = Some(ClearTarget::Answer(kind));
         self.start(ctx, move || {
-            let count = series.submit_answer(prompt, &answer)?;
+            let count = series.submit_answer(kind, &episodes, &answer)?;
             Ok(JobOutput::Status(format!(
-                "Answer {prompt} gave {count} suggestions."
+                "The answer gave {}.",
+                count_of(count, "suggestion")
             )))
         });
     }
@@ -712,16 +734,23 @@ impl App {
     }
 }
 
-/// Reads the three views from the series.
-fn load_views(
-    series: &Series,
-    filter: SuggestionFilter,
-) -> Result<(Vec<Source>, Vec<SuggestionRow>, Vec<EpisodeProgress>)> {
-    Ok((
-        series.sources()?,
-        series.suggestions(&filter)?,
-        series.progress()?,
-    ))
+/// What the views show, read from the series.
+struct Views {
+    saved: Vec<Source>,
+    rows: Vec<SuggestionRow>,
+    progress: Vec<EpisodeProgress>,
+    speakers_answered: BTreeSet<u32>,
+    story_answered: BTreeSet<u32>,
+}
+
+fn load_views(series: &Series, filter: SuggestionFilter) -> Result<Views> {
+    Ok(Views {
+        saved: series.sources()?,
+        rows: series.suggestions(&filter)?,
+        progress: series.progress()?,
+        speakers_answered: series.answered_episodes(PromptKind::Speakers)?,
+        story_answered: series.answered_episodes(PromptKind::Story)?,
+    })
 }
 
 /// The name of a series: the name of its directory.

@@ -52,7 +52,11 @@ impl App {
                     .show(ui, |ui| {
                         for item in &self.progress {
                             let selected = self.selected.contains(&item.episode);
-                            if episode_row(ui, item, selected) {
+                            let answered = answered_text(
+                                self.speakers_answered.contains(&item.episode),
+                                self.story_answered.contains(&item.episode),
+                            );
+                            if episode_row(ui, item, selected, answered) {
                                 clicked = Some(item.episode);
                             }
                         }
@@ -96,29 +100,21 @@ impl App {
     }
 
     pub(super) fn prompts_tab(&mut self, ui: &mut egui::Ui) {
-        let busy = self.busy();
         let ctx = ui.ctx().clone();
 
         self.episode_list(ui);
+        self.refresh_prompt();
 
-        let episodes: Vec<u32> = self.selected.iter().copied().collect();
-        let (new_speakers, new_story) = ui
-            .horizontal(|ui| {
-                match episodes.as_slice() {
-                    [] => ui.weak("Select an episode"),
-                    [episode] => ui.strong(format!("Episode {episode}")),
-                    many => ui.strong(count_of(many.len(), "episode")),
-                };
-                let enabled = !busy && !episodes.is_empty();
-                let speakers = ui
-                    .add_enabled(enabled, egui::Button::new(new_prompt_label("speakers")))
-                    .clicked();
-                let story = ui
-                    .add_enabled(enabled, egui::Button::new(new_prompt_label("story")))
-                    .clicked();
-                (speakers, story)
-            })
-            .inner;
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.prompt_kind, PromptKind::Speakers, "Speakers");
+            ui.selectable_value(&mut self.prompt_kind, PromptKind::Story, "Story");
+            ui.separator();
+            match self.selected.len() {
+                0 => ui.weak("Select an episode"),
+                1 => ui.strong(format!("Episode {}", self.selected.first().unwrap_or(&0))),
+                many => ui.strong(count_of(many, "episode")),
+            };
+        });
         ui.separator();
 
         let PromptEvents { copy, submit } = self.prompt_view(ui, &ctx);
@@ -130,29 +126,74 @@ impl App {
         {
             self.copy_text(&ctx, text, "Copied the prompt.");
         }
-        if new_speakers {
-            self.create_prompt(&ctx, PromptKind::Speakers, episodes.clone());
-        }
-        if new_story {
-            self.create_prompt(&ctx, PromptKind::Story, episodes);
-        }
-        if let Some(prompt) = self
+        if let Some((kind, episodes)) = self
             .prompt
             .as_ref()
-            .map(|prompt| prompt.id)
             .filter(|_| submit)
+            .map(|prompt| (prompt.kind, prompt.episodes.clone()))
         {
-            let answer = self.answer.clone();
-            self.submit(&ctx, prompt, answer);
+            let answer = match kind {
+                PromptKind::Speakers => self.speakers_answer.clone(),
+                PromptKind::Story => self.story_answer.clone(),
+            };
+            self.submit(&ctx, kind, episodes, answer);
         }
     }
 
-    /// The prompt and the answer box. Returns what the user clicked.
+    /// Makes the prompt again when the kind, the selected episodes, or the data changed since the
+    /// last time. It waits while a job runs, because the job may write the index.
+    fn refresh_prompt(&mut self) {
+        let Some(series) = &self.series else {
+            return;
+        };
+        if self.busy() {
+            return;
+        }
+        let episodes: Vec<u32> = self.selected.iter().copied().collect();
+        let key = (self.prompt_kind, episodes, self.data_version);
+        if self.prompt_key.as_ref() == Some(&key) {
+            return;
+        }
+        if key.1.is_empty() {
+            self.prompt = None;
+            self.prompt_error = None;
+        } else {
+            match series.prompt(key.0, &key.1) {
+                Ok(prompt) => {
+                    self.prompt = Some(prompt);
+                    self.prompt_error = None;
+                }
+                Err(error) => {
+                    self.prompt = None;
+                    self.prompt_error = Some(format!("{error:#}"));
+                }
+            }
+        }
+        self.prompt_key = Some(key);
+    }
+
+    /// The prompt and the answer box of the selected kind. Returns what the user clicked.
     fn prompt_view(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) -> PromptEvents {
         let busy = self.busy();
         let mut events = PromptEvents::default();
         let label = self.copy_label(ctx);
-        if let Some(prompt) = &self.prompt {
+        if let Some(message) = &self.prompt_error {
+            ui.colored_label(ui.visuals().error_fg_color, message);
+        } else if let Some(prompt) = &self.prompt {
+            let answered = match prompt.kind {
+                PromptKind::Speakers => &self.speakers_answered,
+                PromptKind::Story => &self.story_answered,
+            };
+            let done: Vec<String> = prompt
+                .episodes
+                .iter()
+                .filter(|episode| answered.contains(episode))
+                .map(u32::to_string)
+                .collect();
+            let answer = match prompt.kind {
+                PromptKind::Speakers => &mut self.speakers_answer,
+                PromptKind::Story => &mut self.story_answer,
+            };
             // The prompt and the answer get one half of the free height each.
             let row = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
             let text_height = ((ui.available_height() - 2.0 * row) / 2.0 - 16.0).max(80.0);
@@ -170,22 +211,36 @@ impl App {
 
             ui.horizontal(|ui| {
                 ui.strong("Answer");
-                events.submit = ui
-                    .add_enabled(
-                        !busy && !self.answer.trim().is_empty(),
-                        egui::Button::new("Submit"),
-                    )
-                    .clicked();
+                let why_not = if busy {
+                    Some("Wait for the current job to finish.".to_string())
+                } else if !done.is_empty() {
+                    Some(format!(
+                        "Episode {} already has a {} answer.",
+                        done.join(", "),
+                        kind_text(prompt.kind)
+                    ))
+                } else if answer.trim().is_empty() {
+                    Some("Paste an answer first.".to_string())
+                } else {
+                    None
+                };
+                let button = ui.add_enabled(why_not.is_none(), egui::Button::new("Submit"));
+                match why_not {
+                    Some(reason) => {
+                        button.on_disabled_hover_text(reason);
+                    }
+                    None => events.submit = button.clicked(),
+                }
             });
             text_area(
                 ui,
                 "answer-text",
                 text_height,
-                &mut self.answer,
+                answer,
                 "Paste the answer of the AI chat here.",
             );
-        } else {
-            ui.weak("Pick episodes, then make a prompt. Copy it to an AI chat and paste the answer here.");
+        } else if self.series.is_some() {
+            ui.weak("Select episodes. The prompt shows here. Copy it to an AI chat and paste the answer below it.");
         }
         events
     }
@@ -196,10 +251,6 @@ impl App {
 struct PromptEvents {
     copy: bool,
     submit: bool,
-}
-
-fn new_prompt_label(kind: &str) -> String {
-    format!("New {kind} prompt")
 }
 
 /// The episodes in words, for example `episode 1` or `episodes 1, 2`.
@@ -220,8 +271,19 @@ fn kind_text(kind: PromptKind) -> &'static str {
     }
 }
 
+/// Which kinds of prompt have an answer for an episode.
+fn answered_text(speakers: bool, story: bool) -> &'static str {
+    match (speakers, story) {
+        (true, true) => "both",
+        (true, false) => "speakers",
+        (false, true) => "story",
+        (false, false) => "-",
+    }
+}
+
 /// Where the columns of the episode list start, as fractions of the row width.
-const SPEAKERS_AT: f32 = 0.34;
+const SPEAKERS_AT: f32 = 0.28;
+const ANSWERED_AT: f32 = 0.62;
 
 /// The inner margin of a row of the episode list, in points.
 const ROW_PADDING: f32 = 8.0;
@@ -251,6 +313,13 @@ fn list_header(ui: &mut egui::Ui) {
         color,
     );
     painter.text(
+        egui::pos2(at(ANSWERED_AT), rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        "Answered",
+        font.clone(),
+        color,
+    );
+    painter.text(
         egui::pos2(at(1.0), rect.center().y),
         egui::Align2::RIGHT_CENTER,
         "Facts",
@@ -260,7 +329,7 @@ fn list_header(ui: &mut egui::Ui) {
 }
 
 /// One row of the episode list. Returns true when the user clicked it.
-fn episode_row(ui: &mut egui::Ui, item: &EpisodeProgress, selected: bool) -> bool {
+fn episode_row(ui: &mut egui::Ui, item: &EpisodeProgress, selected: bool, answered: &str) -> bool {
     let sense = if item.has_subtitle {
         egui::Sense::click()
     } else {
@@ -299,7 +368,7 @@ fn episode_row(ui: &mut egui::Ui, item: &EpisodeProgress, selected: bool) -> boo
         None => ("no subtitle".to_string(), text_color),
         Some(0) => ("done".to_string(), text_color),
         Some(count) => (
-            format!("{count} lines unknown"),
+            format!("{count} unknown"),
             if selected { text_color } else { warn },
         ),
     };
@@ -309,6 +378,13 @@ fn episode_row(ui: &mut egui::Ui, item: &EpisodeProgress, selected: bool) -> boo
         speakers,
         font.clone(),
         speakers_color,
+    );
+    painter.text(
+        egui::pos2(at(ANSWERED_AT), y),
+        egui::Align2::LEFT_CENTER,
+        answered,
+        font.clone(),
+        text_color,
     );
     painter.text(
         egui::pos2(at(1.0), y),

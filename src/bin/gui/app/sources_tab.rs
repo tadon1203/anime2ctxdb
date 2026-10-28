@@ -279,15 +279,14 @@ impl App {
         remove
     }
 
-    /// Asks the user before it removes sources. A source that a prompt or an answer uses stays.
+    /// Asks the user before it removes sources. A source that an answer uses stays.
     fn ask_remove(&mut self, ids: Vec<SourceId>) {
         let Some(series) = &self.series else {
             return;
         };
         match series.blocked_removals(&ids) {
             Ok(blocked) if blocked.len() == ids.len() => {
-                self.status =
-                    "Nothing to remove: a prompt or an answer uses every one of them.".to_string();
+                self.status = "Nothing to remove: an answer uses every one of them.".to_string();
             }
             Ok(blocked) => self.confirm = Some(Confirm::Remove { ids, blocked }),
             Err(error) => self.error = Some(format!("{error:#}")),

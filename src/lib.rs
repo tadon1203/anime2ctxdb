@@ -10,14 +10,12 @@ use anyhow::{Result, bail};
 use std::path::PathBuf;
 
 pub use model::{Position, parse_clock};
-pub use series::{
-    Decided, EpisodeProgress, PromptRow, Removed, Series, SuggestionFilter, SuggestionRow,
-};
+pub use series::{Decided, EpisodeProgress, Removed, Series, SuggestionFilter, SuggestionRow};
 pub use sources::{
     Detected, EpisodeOrigin, Failure, Language, Problem, Scan, Severity, Source, SourceId,
     SourceKind,
 };
-pub use suggestions::prompt::{Prompt, PromptId, PromptKind};
+pub use suggestions::prompt::{Prompt, PromptKind};
 pub use suggestions::suggestion::{Action, Status, SuggestionId, SuggestionKind};
 
 /// The app data folder. The series folders live in it, and so does the app lock.

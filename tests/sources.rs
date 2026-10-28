@@ -404,7 +404,7 @@ fn remove_deletes_the_record_and_the_copy_but_not_the_original() {
 }
 
 #[test]
-fn remove_keeps_a_source_that_a_prompt_uses() {
+fn remove_keeps_a_source_that_an_answer_uses() {
     let root = TempDir::new().expect("a temporary directory");
     let series = new_series(&root);
     let first = copy_subtitle(root.path(), "Show - 01.ass");
@@ -415,8 +415,12 @@ fn remove_keeps_a_source_that_a_prompt_uses() {
     series.add_sources(&records).expect("the sources are added");
     let saved = series.sources().expect("the sources load");
     series
-        .create_prompt(PromptKind::Story, &[1])
-        .expect("the prompt is created");
+        .submit_answer(
+            PromptKind::Speakers,
+            &[1],
+            r#"{ "new_characters": [{ "ref": "N1", "name": "x", "evidence": ["L1"] }] }"#,
+        )
+        .expect("the answer is submitted");
     let ids: Vec<SourceId> = saved.iter().map(|record| record.id.clone()).collect();
 
     let blocked = series.blocked_removals(&ids).expect("the check runs");

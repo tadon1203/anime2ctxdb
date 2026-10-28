@@ -410,23 +410,20 @@ pub(crate) fn add(series_dir: &Path, records: &[Source]) -> Result<()> {
     append_jsonl(&series_dir.join("sources.jsonl"), records)
 }
 
-/// The sources in `ids` that a prompt or an answer uses. A prompt or an answer has the ID of
-/// each source whose lines it uses, so a search for the ID in their text finds them.
+/// The sources in `ids` that an answer uses. An answer file has the ID of each source whose
+/// lines it uses, so a search for the ID in its text finds them.
 pub(crate) fn find_used(series_dir: &Path, ids: &[SourceId]) -> Result<Vec<SourceId>> {
     let mut texts = Vec::new();
-    for name in ["prompts", "answers"] {
-        let directory = series_dir.join(name);
-        let entries = fs::read_dir(&directory)
-            .with_context(|| format!("cannot read {}", directory.display()))?;
-        for entry in entries {
-            let path = entry
-                .with_context(|| format!("cannot read {}", directory.display()))?
-                .path();
-            texts.push(
-                fs::read_to_string(&path)
-                    .with_context(|| format!("cannot read {}", path.display()))?,
-            );
-        }
+    let directory = series_dir.join("answers");
+    let entries =
+        fs::read_dir(&directory).with_context(|| format!("cannot read {}", directory.display()))?;
+    for entry in entries {
+        let path = entry
+            .with_context(|| format!("cannot read {}", directory.display()))?
+            .path();
+        texts.push(
+            fs::read_to_string(&path).with_context(|| format!("cannot read {}", path.display()))?,
+        );
     }
     Ok(ids
         .iter()
