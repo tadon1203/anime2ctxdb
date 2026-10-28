@@ -1,6 +1,6 @@
 use super::{
     AnswerError, Numbering, Prompt, PromptId, PromptKind, PromptLine, entity_list, entity_ref,
-    evidence_of, line_ref, list_or_none, transcript,
+    episodes_text, evidence_of, line_ref, list_or_none, transcript,
 };
 use crate::model::{Entity, EntityId, Position, format_clock};
 use crate::suggestions::suggestion::{Content, Suggestion};
@@ -67,8 +67,8 @@ struct AnswerScene {
     summary: String,
 }
 
-/// Builds a Story prompt for one episode.
-pub fn make(id: PromptId, episode: u32, input: &StoryInput) -> Prompt {
+/// Builds a Story prompt for one or more episodes.
+pub fn make(id: PromptId, episodes: &[u32], input: &StoryInput) -> Prompt {
     let mut refs = BTreeMap::new();
     let (entity_lines, entity_refs) = entity_list(&input.entities, &mut refs);
     let transcript_lines = transcript(&input.lines, &entity_refs, &mut refs);
@@ -77,14 +77,14 @@ pub fn make(id: PromptId, episode: u32, input: &StoryInput) -> Prompt {
     let text = TEMPLATE
         .replace("{{entities}}", &list_or_none(&entity_lines))
         .replace("{{facts}}", &list_or_none(&fact_lines))
-        .replace("{{episode}}", &episode.to_string())
+        .replace("{{episodes}}", &episodes_text(episodes))
         .replace("{{transcript}}", &list_or_none(&transcript_lines))
         .replace("{{format}}", FORMAT);
 
     Prompt {
         id,
         kind: PromptKind::Story,
-        episode,
+        episodes: episodes.to_vec(),
         text,
         refs,
     }
@@ -182,7 +182,7 @@ mod tests {
         Prompt {
             id: PromptId(5),
             kind: PromptKind::Story,
-            episode: 2,
+            episodes: vec![2],
             text: String::new(),
             refs: BTreeMap::from([
                 ("L1".to_string(), "s:0".to_string()),
@@ -284,6 +284,32 @@ mod tests {
         .expect_err("the end is before the start");
 
         assert!(matches!(error, AnswerError::SceneOrder(1)));
+    }
+
+    #[test]
+    fn make_puts_the_lines_of_all_episodes_in_one_transcript() {
+        let line = |id: &str, episode| PromptLine {
+            id: LineId(id.to_string()),
+            episode,
+            start_ms: 1_000,
+            color: None,
+            label: None,
+            text: "t".to_string(),
+            speaker: crate::speakers::Speaker::Unknown,
+        };
+        let input = StoryInput {
+            lines: vec![line("s:0", 1), line("t:0", 2)],
+            entities: vec![],
+            facts: vec![],
+        };
+
+        let prompt = make(PromptId(6), &[1, 2], &input);
+
+        assert_eq!(prompt.episodes, [1, 2]);
+        assert!(prompt.text.contains("episodes 1, 2"));
+        assert!(prompt.text.contains("L1 E1 00:01 t [?]"));
+        assert!(prompt.text.contains("L2 E2 00:01 t [?]"));
+        assert_eq!(prompt.refs["L2"], "t:0");
     }
 
     #[test]

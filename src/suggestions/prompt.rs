@@ -5,7 +5,7 @@ use crate::model::{CHARACTER, Entity, EntityId, format_clock};
 use crate::sources::ass::LineId;
 use crate::speakers::Speaker;
 use crate::suggestions::suggestion::{Evidence, Suggestion, SuggestionId};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use thiserror::Error;
@@ -34,14 +34,31 @@ pub enum PromptKind {
 pub struct Prompt {
     pub id: PromptId,
     pub kind: PromptKind,
-    pub episode: u32,
+    /// The episodes of the transcript, in order. An old prompt file has one number, `episode`.
+    #[serde(alias = "episode", deserialize_with = "episodes_from_file")]
+    pub episodes: Vec<u32>,
     pub text: String,
     /// Short reference (`L1`, `C1`, `T1`) to the real ID.
     pub refs: BTreeMap<String, String>,
 }
 
+/// Reads the episodes of a prompt file: a list, or the one number of an old file.
+fn episodes_from_file<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u32>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Episodes {
+        One(u32),
+        Many(Vec<u32>),
+    }
+    Ok(match Episodes::deserialize(deserializer)? {
+        Episodes::One(episode) => vec![episode],
+        Episodes::Many(episodes) => episodes,
+    })
+}
+
 pub struct PromptLine {
     pub id: LineId,
+    pub episode: u32,
     pub start_ms: u32,
     pub color: Option<u32>,
     pub label: Option<String>,
@@ -145,7 +162,11 @@ fn transcript(
     for (index, line) in lines.iter().enumerate() {
         let reference = format!("L{}", index + 1);
         refs.insert(reference.clone(), line.id.0.clone());
-        let mut parts = vec![reference, format_clock(line.start_ms)];
+        let mut parts = vec![
+            reference,
+            format!("E{}", line.episode),
+            format_clock(line.start_ms),
+        ];
         if let Some(color) = line.color {
             parts.push(format!("#{color:06X}"));
         }
@@ -222,11 +243,51 @@ fn speaker_text(speaker: &Speaker, entity_refs: &HashMap<String, String>) -> Str
     }
 }
 
+/// The episodes in words, for example `episode 1` or `episodes 1, 2, 3`.
+fn episodes_text(episodes: &[u32]) -> String {
+    let numbers: Vec<String> = episodes.iter().map(u32::to_string).collect();
+    let noun = if episodes.len() == 1 {
+        "episode"
+    } else {
+        "episodes"
+    };
+    format!("{noun} {}", numbers.join(", "))
+}
+
 /// The lines of a list, or `none` for an empty list.
 fn list_or_none(items: &[String]) -> String {
     if items.is_empty() {
         "none".to_string()
     } else {
         items.join("\n")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_prompt_file_with_one_episode_number_still_loads() {
+        let json = r#"{ "id": 1, "kind": "story", "episode": 3, "text": "", "refs": {} }"#;
+
+        let prompt: Prompt = serde_json::from_str(json).expect("the old file loads");
+
+        assert_eq!(prompt.episodes, [3]);
+    }
+
+    #[test]
+    fn a_prompt_file_with_a_list_of_episodes_loads() {
+        let json = r#"{ "id": 1, "kind": "story", "episodes": [1, 2], "text": "", "refs": {} }"#;
+
+        let prompt: Prompt = serde_json::from_str(json).expect("the file loads");
+
+        assert_eq!(prompt.episodes, [1, 2]);
+    }
+
+    #[test]
+    fn episodes_are_named_in_words() {
+        assert_eq!(episodes_text(&[4]), "episode 4");
+        assert_eq!(episodes_text(&[1, 2, 5]), "episodes 1, 2, 5");
     }
 }

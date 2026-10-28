@@ -31,6 +31,7 @@ fn line_from(transcript: &str, clock: &str) -> String {
         .find_map(|line| {
             let mut parts = line.split(' ');
             let reference = parts.next()?;
+            let _episode = parts.next()?;
             let time = parts.next()?;
             (reference.starts_with('L') && time >= clock).then(|| reference.to_string())
         })
@@ -58,7 +59,7 @@ fn story_answer(transcript: &str) -> String {
 fn story_series(root: &std::path::Path) -> Series {
     let series = series_with_episodes(root, 1);
     let prompt = series
-        .create_prompt(PromptKind::Story, 1)
+        .create_prompt(PromptKind::Story, &[1])
         .expect("the prompt is created");
     series
         .submit_answer(prompt.id, &story_answer(&prompt.text))

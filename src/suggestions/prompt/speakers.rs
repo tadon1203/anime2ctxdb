@@ -1,6 +1,6 @@
 use super::{
     AnswerError, Numbering, Prompt, PromptId, PromptKind, PromptLine, entity_list, entity_ref,
-    evidence_of, line_ref, list_or_none, transcript,
+    episodes_text, evidence_of, line_ref, list_or_none, transcript,
 };
 use crate::model::{CHARACTER, Entity, EntityId};
 use crate::speakers::LabelKind;
@@ -82,7 +82,7 @@ fn parse_color<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Err
 }
 
 /// Builds a Speakers prompt. The short references are `L1` for lines and `C1` for characters, in order.
-pub fn make(id: PromptId, episode: u32, input: &SpeakersInput) -> Prompt {
+pub fn make(id: PromptId, episodes: &[u32], input: &SpeakersInput) -> Prompt {
     let mut refs = BTreeMap::new();
     let (character_lines, entity_refs) = entity_list(&input.entities, &mut refs);
     let transcript_lines = transcript(&input.lines, &entity_refs, &mut refs);
@@ -93,6 +93,7 @@ pub fn make(id: PromptId, episode: u32, input: &SpeakersInput) -> Prompt {
         .map(|color| format!("#{color:06X}"))
         .collect();
     let text = TEMPLATE
+        .replace("{{episodes}}", &episodes_text(episodes))
         .replace("{{characters}}", &list_or_none(&character_lines))
         .replace("{{transcript}}", &list_or_none(&transcript_lines))
         .replace("{{labels}}", &list_or_none(&input.labels))
@@ -102,7 +103,7 @@ pub fn make(id: PromptId, episode: u32, input: &SpeakersInput) -> Prompt {
     Prompt {
         id,
         kind: PromptKind::Speakers,
-        episode,
+        episodes: episodes.to_vec(),
         text,
         refs,
     }
@@ -189,7 +190,7 @@ mod tests {
         Prompt {
             id: PromptId(3),
             kind: PromptKind::Speakers,
-            episode: 1,
+            episodes: vec![1],
             text: String::new(),
             refs: BTreeMap::from([
                 ("L1".to_string(), "s:0".to_string()),
@@ -284,6 +285,7 @@ mod tests {
         let input = SpeakersInput {
             lines: vec![PromptLine {
                 id: LineId("s:0".to_string()),
+                episode: 1,
                 start_ms: 61_000,
                 color: Some(0x00FF_FF00),
                 label: Some("あんな".to_string()),
@@ -303,12 +305,12 @@ mod tests {
             colors: vec![],
         };
 
-        let prompt = make(PromptId(4), 1, &input);
+        let prompt = make(PromptId(4), &[1], &input);
 
         assert!(
             prompt
                 .text
-                .contains("L1 01:01 #FFFF00 （あんな） わたし [C1]")
+                .contains("L1 E1 01:01 #FFFF00 （あんな） わたし [C1]")
         );
         assert_eq!(prompt.refs["L1"], "s:0");
         assert_eq!(prompt.refs["C1"], "2-1");

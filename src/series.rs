@@ -24,6 +24,15 @@ pub struct Series {
     dir: PathBuf,
 }
 
+/// The files and directories that every series directory has.
+const SERIES_ENTRIES: [&str; 5] = [
+    "sources.jsonl",
+    "decisions.jsonl",
+    "sources",
+    "prompts",
+    "answers",
+];
+
 /// Checks that a new series can use the directory: it is missing or empty.
 fn check_new_dir(dir: &Path) -> Result<()> {
     if dir.exists() {
@@ -95,15 +104,30 @@ impl Series {
         })
     }
 
+    /// The series directories inside `root`, sorted by name. A missing `root` has no series.
+    /// A directory that is not a series is left out.
+    pub fn list(root: &Path) -> Result<Vec<PathBuf>> {
+        if !root.exists() {
+            return Ok(Vec::new());
+        }
+        let entries =
+            fs::read_dir(root).with_context(|| format!("cannot read {}", root.display()))?;
+        let mut dirs = Vec::new();
+        for entry in entries {
+            let path = entry
+                .with_context(|| format!("cannot read {}", root.display()))?
+                .path();
+            if SERIES_ENTRIES.iter().all(|name| path.join(name).exists()) {
+                dirs.push(path);
+            }
+        }
+        dirs.sort();
+        Ok(dirs)
+    }
+
     /// Opens an existing series. The index is built again when it is missing.
     pub fn open(dir: &Path) -> Result<Series> {
-        for name in [
-            "sources.jsonl",
-            "decisions.jsonl",
-            "sources",
-            "prompts",
-            "answers",
-        ] {
+        for name in SERIES_ENTRIES {
             ensure!(
                 dir.join(name).exists(),
                 "{} is not a series folder: {name} is missing. Use New series to make a series.",
@@ -271,15 +295,19 @@ impl Series {
         Ok(package::build(&input))
     }
 
-    /// Writes a new prompt file. It does not rebuild the index.
-    pub fn create_prompt(&self, kind: PromptKind, episode: u32) -> Result<Prompt> {
+    /// Writes a new prompt file for one or more episodes. It does not rebuild the index.
+    pub fn create_prompt(&self, kind: PromptKind, episodes: &[u32]) -> Result<Prompt> {
+        let mut episodes = episodes.to_vec();
+        episodes.sort_unstable();
+        episodes.dedup();
+        ensure!(!episodes.is_empty(), "a prompt needs at least one episode");
         let index = Index::open(&self.dir)?;
         let id = self.next_prompt_id()?;
         let prompt = match kind {
             PromptKind::Speakers => {
-                prompt::speakers::make(id, episode, &index.speakers_input(episode)?)
+                prompt::speakers::make(id, &episodes, &index.speakers_input(&episodes)?)
             }
-            PromptKind::Story => prompt::story::make(id, episode, &index.story_input(episode)?),
+            PromptKind::Story => prompt::story::make(id, &episodes, &index.story_input(&episodes)?),
         };
         let path = self.prompt_file(id);
         write_atomic(&path, &serde_json::to_string_pretty(&prompt)?)?;

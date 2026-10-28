@@ -1,18 +1,18 @@
-Extract information about the story from this episode of an anime.
+Extract information about the story from {{episodes}} of an anime.
 
 Known entities:
 {{entities}}
 
-Known facts before this episode:
+Known facts before the first episode below:
 {{facts}}
 
-Transcript of episode {{episode}}. Each line has an ID, a time, a speaker label, the text, and the speaker ([?] is unknown, [-] is no speaker):
+Transcript of {{episodes}}. Each line has an ID, an episode, a time, a speaker label, the text, and the speaker ([?] is unknown, [-] is no speaker):
 {{transcript}}
 
 Tell me:
 - new entities: a person, a place, an organization, an object, or a concept. Give each one a kind, for example character, place, organization, object, or concept.
 - facts: one thing that the lines show about entities. For example, a trait that a character shows, a speech style, how one character calls another, a relationship, a goal, what a character knows, what happens, or a description of a place.
-- scenes: a range of lines in one place, with the place and a one-sentence summary of what happens.
+- scenes: a range of lines in one place and one episode, with the place and a one-sentence summary of what happens.
 
 Rules:
 - Use only this transcript, not other knowledge of the series.

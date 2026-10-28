@@ -600,25 +600,34 @@ impl Index {
         }
     }
 
-    /// The input of a Speakers prompt. It fails when the episode has no `Ja` subtitle.
-    pub fn speakers_input(&self, episode: u32) -> Result<SpeakersInput> {
-        require_subtitle(&self.connection, episode)?;
-        let lines = self.prompt_lines(episode)?;
+    /// The input of a Speakers prompt. It fails when an episode has no `Ja` subtitle.
+    pub fn speakers_input(&self, episodes: &[u32]) -> Result<SpeakersInput> {
+        let mut labels = BTreeSet::new();
+        let mut colors = BTreeSet::new();
+        for &episode in episodes {
+            require_subtitle(&self.connection, episode)?;
+            labels.extend(unapproved_labels(&self.connection, episode)?);
+            colors.extend(unapproved_colors(&self.connection, episode)?);
+        }
         Ok(SpeakersInput {
-            lines,
+            lines: self.prompt_lines(episodes)?,
             entities: entities(&self.connection, Some(CHARACTER))?,
-            labels: unapproved_labels(&self.connection, episode)?,
-            colors: unapproved_colors(&self.connection, episode)?,
+            labels: labels.into_iter().collect(),
+            colors: colors.into_iter().collect(),
         })
     }
 
-    /// The input of a Story prompt. It fails when the episode has no `Ja` subtitle.
-    pub fn story_input(&self, episode: u32) -> Result<StoryInput> {
-        require_subtitle(&self.connection, episode)?;
+    /// The input of a Story prompt. It fails when an episode has no `Ja` subtitle. The known
+    /// facts are the facts before the first episode.
+    pub fn story_input(&self, episodes: &[u32]) -> Result<StoryInput> {
+        for &episode in episodes {
+            require_subtitle(&self.connection, episode)?;
+        }
+        let first = episodes.iter().min().copied().unwrap_or_default();
         Ok(StoryInput {
-            lines: self.prompt_lines(episode)?,
+            lines: self.prompt_lines(episodes)?,
             entities: entities(&self.connection, None)?,
-            facts: known_facts(&self.connection, episode)?,
+            facts: known_facts(&self.connection, first)?,
         })
     }
 
@@ -634,8 +643,17 @@ impl Index {
         })
     }
 
+    /// The lines of the episodes in order, with their current speakers.
+    fn prompt_lines(&self, episodes: &[u32]) -> Result<Vec<PromptLine>> {
+        let mut lines = Vec::new();
+        for &episode in episodes {
+            lines.extend(self.episode_lines(episode)?);
+        }
+        Ok(lines)
+    }
+
     /// The lines of one episode in time order, with their current speakers.
-    fn prompt_lines(&self, episode: u32) -> Result<Vec<PromptLine>> {
+    fn episode_lines(&self, episode: u32) -> Result<Vec<PromptLine>> {
         let speakers = speakers_of_episode(&self.connection, episode)?;
         let mut statement = self.connection.prepare(
             "SELECT id, start_ms, color, speaker_label, text FROM lines WHERE episode = ?1 ORDER BY rowid",
@@ -655,6 +673,7 @@ impl Index {
                 let speaker = speakers.get(&id).cloned().unwrap_or(Speaker::Unknown);
                 Ok(PromptLine {
                     id: LineId(id),
+                    episode,
                     start_ms,
                     color,
                     label,

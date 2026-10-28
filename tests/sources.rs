@@ -256,6 +256,26 @@ fn new_dir_rejects_a_bad_name_and_a_directory_that_is_not_empty() {
 }
 
 #[test]
+fn list_finds_only_the_series_directories() {
+    let root = TempDir::new().expect("a temporary directory");
+    assert_eq!(
+        Series::list(&root.path().join("missing")).expect("a missing root is fine"),
+        Vec::<PathBuf>::new()
+    );
+    for name in ["B show", "A show"] {
+        Series::create(&root.path().join(name)).expect("the series is made");
+    }
+    fs::create_dir(root.path().join("other")).expect("the directory is made");
+    fs::write(root.path().join("note.txt"), b"x").expect("the note is written");
+
+    let dirs = Series::list(root.path()).expect("the root is read");
+    assert_eq!(
+        dirs,
+        vec![root.path().join("A show"), root.path().join("B show")]
+    );
+}
+
+#[test]
 fn save_rejects_a_video_with_a_language() {
     let inputs = TempDir::new().expect("a temporary directory");
     let series = new_series(&inputs);

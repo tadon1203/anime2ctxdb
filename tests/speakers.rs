@@ -37,7 +37,7 @@ fn create_prompt_has_the_transcript_and_the_labels() {
     let series = series_with_episode_one(root.path());
 
     let prompt = series
-        .create_prompt(PromptKind::Speakers, 1)
+        .create_prompt(PromptKind::Speakers, &[1])
         .expect("the prompt is created");
 
     assert_eq!(prompt.id.0, 1);
@@ -55,7 +55,7 @@ fn create_prompt_fails_for_an_episode_without_a_ja_subtitle() {
     let series = series_with_episode_one(root.path());
 
     let error = series
-        .create_prompt(PromptKind::Speakers, 2)
+        .create_prompt(PromptKind::Speakers, &[2])
         .expect_err("episode 2 has no subtitle");
 
     assert!(format!("{error:#}").contains("no Ja subtitle"));
@@ -66,7 +66,7 @@ fn submit_answer_creates_suggestions_and_rejects_a_second_answer() {
     let root = TempDir::new().expect("a temporary directory");
     let series = series_with_episode_one(root.path());
     let prompt = series
-        .create_prompt(PromptKind::Speakers, 1)
+        .create_prompt(PromptKind::Speakers, &[1])
         .expect("the prompt is created");
 
     let count = series
@@ -85,7 +85,7 @@ fn invalid_answer_writes_no_file() {
     let root = TempDir::new().expect("a temporary directory");
     let series = series_with_episode_one(root.path());
     let prompt = series
-        .create_prompt(PromptKind::Speakers, 1)
+        .create_prompt(PromptKind::Speakers, &[1])
         .expect("the prompt is created");
 
     let error = series
@@ -101,7 +101,7 @@ fn approve_all_shown_makes_speakers_known() {
     let root = TempDir::new().expect("a temporary directory");
     let series = series_with_episode_one(root.path());
     let prompt = series
-        .create_prompt(PromptKind::Speakers, 1)
+        .create_prompt(PromptKind::Speakers, &[1])
         .expect("the prompt is created");
     series
         .submit_answer(prompt.id, ANSWER)
@@ -136,7 +136,7 @@ fn a_rejected_character_makes_its_label_invalid() {
     let root = TempDir::new().expect("a temporary directory");
     let series = series_with_episode_one(root.path());
     let prompt = series
-        .create_prompt(PromptKind::Speakers, 1)
+        .create_prompt(PromptKind::Speakers, &[1])
         .expect("the prompt is created");
     series
         .submit_answer(prompt.id, ANSWER)
@@ -158,7 +158,7 @@ fn a_label_waits_while_its_character_is_pending() {
     let root = TempDir::new().expect("a temporary directory");
     let series = series_with_episode_one(root.path());
     let prompt = series
-        .create_prompt(PromptKind::Speakers, 1)
+        .create_prompt(PromptKind::Speakers, &[1])
         .expect("the prompt is created");
     series
         .submit_answer(prompt.id, ANSWER)
@@ -182,7 +182,7 @@ fn revoke_returns_an_approved_character_to_pending() {
     let root = TempDir::new().expect("a temporary directory");
     let series = series_with_episode_one(root.path());
     let prompt = series
-        .create_prompt(PromptKind::Speakers, 1)
+        .create_prompt(PromptKind::Speakers, &[1])
         .expect("the prompt is created");
     series
         .submit_answer(prompt.id, ANSWER)
@@ -207,7 +207,7 @@ fn revoking_a_line_speaker_brings_back_its_unknown_line() {
     let root = TempDir::new().expect("a temporary directory");
     let series = series_with_episode_one(root.path());
     let prompt = series
-        .create_prompt(PromptKind::Speakers, 1)
+        .create_prompt(PromptKind::Speakers, &[1])
         .expect("the prompt is created");
     series
         .submit_answer(prompt.id, ANSWER)
@@ -238,7 +238,7 @@ fn a_second_approval_of_the_same_label_is_skipped() {
     let root = TempDir::new().expect("a temporary directory");
     let series = series_with_episode_one(root.path());
     let first = series
-        .create_prompt(PromptKind::Speakers, 1)
+        .create_prompt(PromptKind::Speakers, &[1])
         .expect("the prompt is created");
     series
         .submit_answer(first.id, ANSWER)
@@ -253,7 +253,7 @@ fn a_second_approval_of_the_same_label_is_skipped() {
         )
         .expect("the decisions are made");
     let second = series
-        .create_prompt(PromptKind::Speakers, 1)
+        .create_prompt(PromptKind::Speakers, &[1])
         .expect("the prompt is created");
     series
         .submit_answer(second.id, ANSWER)

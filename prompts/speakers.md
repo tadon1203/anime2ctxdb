@@ -1,9 +1,9 @@
-Find who speaks each line in this episode of an anime.
+Find who speaks each line in {{episodes}} of an anime.
 
 Known characters:
 {{characters}}
 
-Transcript. Each line has an ID, a time, a text color, a speaker label, the text, and the current speaker ([?] is unknown, [-] is no speaker):
+Transcript. Each line has an ID, an episode, a time, a text color, a speaker label, the text, and the current speaker ([?] is unknown, [-] is no speaker):
 {{transcript}}
 
 Tell me:
