@@ -44,12 +44,12 @@ The template for this document. Replace each placeholder in `<>`. Keep all other
 
 ## Mental model
 
-The library owns the logic and the files of a series. The app calls only the library. The project is one Rust crate (edition 2024) with a library and a binary.
+The library owns the logic and the files of a series. The app calls only the library. The project is one Rust crate (edition 2024) with a library and a GUI binary.
 
 - Files (`src/series/`, `src/sources/`, `src/suggestions/`; plain JSON, JSONL, and text files in a series directory): the source of truth. They own imported sources, parsed lines, prompts, answers, and user decisions. They must not hold data that the app can derive from other files.
-- Library (`src/`, without `app.rs` and `main.rs`; Rust, serde, regex): reads sources, parses subtitles, resolves speakers, builds the context package, and writes the files. It owns all logic and all file access. It must not depend on egui and must not have network code.
+- Library (`src/`, without `bin/`; Rust, serde, regex): reads sources, parses subtitles, resolves speakers, builds the context package, and writes the files. It owns all logic and all file access. It must not depend on egui and must not have network code.
 - Index (`src/series/`, SQLite through rusqlite): derived from the files. It owns fast queries for the views. It must not hold any truth. The app rebuilds it after each write that changes data.
-- App (`src/app.rs`, `src/main.rs`; egui through eframe, rfd for file dialogs): shows the views. It owns view state only. It calls only `Series`. It runs the slow write calls on worker threads. It must not read or write series files or the index directly.
+- App (`src/bin/gui/`; egui through eframe, rfd for file dialogs): shows the views. It owns view state only. It calls only `Series`. It runs the slow write calls on worker threads. It must not read or write series files or the index directly.
 
 Data flows in two directions:
 
@@ -62,7 +62,8 @@ The code is split by feature. A feature is a module with the same name as its di
 
 | Directory       | What it holds                                                                         |
 | --------------- | ------------------------------------------------------------------------------------- |
-| `src/`          | The app (the binary), the library root, and the context package. The root lists everything public. |
+| `src/`          | The library root and the context package. The root lists everything public.          |
+| `src/bin/gui/`  | The GUI binary: the app state and one file for each tab.                              |
 | `src/series/`   | `Series`, the one entry point of the library, and the SQLite index.                   |
 | `src/sources/`  | Import of subtitle files, and the subtitle parser.                                    |
 | `src/speakers/` | Speaker rules.                                                                        |

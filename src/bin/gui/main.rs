@@ -48,6 +48,5 @@ fn main() -> Result<()> {
             Ok(Box::new(app::App::default()))
         }),
     )?;
-    drop(lock_file);
     Ok(())
 }

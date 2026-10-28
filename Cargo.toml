@@ -3,6 +3,10 @@ name = "anime2ctxdb"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "anime2ctxdb-gui"
+path = "src/bin/gui/main.rs"
+
 [dependencies]
 anyhow = "1.0.104"
 dirs = "7.0.0"
