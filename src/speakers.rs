@@ -1,27 +1,7 @@
+use crate::model::EntityId;
 use crate::sources::ass::{self, LineId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fmt;
-
-pub(crate) mod prompt;
-pub(crate) mod suggestion;
-
-/// The `SuggestionId` of the suggestion that made the character.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct CharacterId(pub String);
-
-impl fmt::Display for CharacterId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Character {
-    pub id: CharacterId,
-    pub name: String,
-    pub reading: Option<String>,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -49,14 +29,14 @@ pub enum Speaker {
     Unknown,
     /// A sound, an extra, or an approved empty list.
     Nobody,
-    Characters(Vec<CharacterId>, SpeakerMethod),
+    Characters(Vec<EntityId>, SpeakerMethod),
 }
 
 /// An approved speaker label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Label {
     pub kind: LabelKind,
-    pub character: Option<CharacterId>,
+    pub character: Option<EntityId>,
 }
 
 /// The largest gap, in ms, from the end of an earlier line to the start of a line that copies its speaker.
@@ -68,8 +48,8 @@ const PREVIOUS_LINE_GAP_MS: i64 = 10_000;
 pub fn resolve(
     lines: &[(LineId, &ass::Line)],
     labels: &HashMap<String, Label>,
-    colors: &HashMap<u32, CharacterId>,
-    line_speakers: &HashMap<LineId, Vec<CharacterId>>,
+    colors: &HashMap<u32, EntityId>,
+    line_speakers: &HashMap<LineId, Vec<EntityId>>,
 ) -> Vec<Speaker> {
     let mut speakers: Vec<Speaker> = Vec::with_capacity(lines.len());
     for (position, (id, line)) in lines.iter().enumerate() {
@@ -88,8 +68,8 @@ fn resolve_one(
     id: &LineId,
     line: &ass::Line,
     labels: &HashMap<String, Label>,
-    colors: &HashMap<u32, CharacterId>,
-    line_speakers: &HashMap<LineId, Vec<CharacterId>>,
+    colors: &HashMap<u32, EntityId>,
+    line_speakers: &HashMap<LineId, Vec<EntityId>>,
 ) -> Option<Speaker> {
     if let Some(characters) = line_speakers.get(id) {
         return Some(if characters.is_empty() {
@@ -123,7 +103,7 @@ fn label_speaker(label_text: &str, labels: &HashMap<String, Label>) -> Option<Sp
     if found.iter().any(|label| label.kind == LabelKind::Note) {
         return None;
     }
-    let mut characters: Vec<CharacterId> = Vec::new();
+    let mut characters: Vec<EntityId> = Vec::new();
     for label in found
         .iter()
         .filter(|label| label.kind == LabelKind::Character)
@@ -182,8 +162,8 @@ mod tests {
         }
     }
 
-    fn character(id: &str) -> CharacterId {
-        CharacterId(id.to_string())
+    fn character(id: &str) -> EntityId {
+        EntityId(id.to_string())
     }
 
     fn labels() -> HashMap<String, Label> {

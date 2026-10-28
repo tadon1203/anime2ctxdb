@@ -46,8 +46,8 @@ The template for this document. Replace each placeholder in `<>`. Keep all other
 
 The library owns the logic and the files of a series. The app calls only the library. The project is one Rust crate (edition 2024) with a library and a binary.
 
-- Files (`src/series/`, `src/sources/`, `src/speakers/`; plain JSON, JSONL, and text files in a series directory): the source of truth. They own imported sources, parsed lines, prompts, answers, and user decisions. They must not hold data that the app can derive from other files.
-- Library (`src/`, without `app.rs` and `main.rs`; Rust, serde, regex): reads sources, parses subtitles, resolves speakers, and writes the files. It owns all logic and all file access. It must not depend on egui and must not have network code.
+- Files (`src/series/`, `src/sources/`, `src/suggestions/`; plain JSON, JSONL, and text files in a series directory): the source of truth. They own imported sources, parsed lines, prompts, answers, and user decisions. They must not hold data that the app can derive from other files.
+- Library (`src/`, without `app.rs` and `main.rs`; Rust, serde, regex): reads sources, parses subtitles, resolves speakers, builds the context package, and writes the files. It owns all logic and all file access. It must not depend on egui and must not have network code.
 - Index (`src/series/`, SQLite through rusqlite): derived from the files. It owns fast queries for the views. It must not hold any truth. The app rebuilds it after each write that changes data.
 - App (`src/app.rs`, `src/main.rs`; egui through eframe, rfd for file dialogs): shows the views. It owns view state only. It calls only `Series`. It runs the slow write calls on worker threads. It must not read or write series files or the index directly.
 
@@ -62,10 +62,11 @@ The code is split by feature. A feature is a module with the same name as its di
 
 | Directory       | What it holds                                                                         |
 | --------------- | ------------------------------------------------------------------------------------- |
-| `src/`          | The app (the binary) and the library root. The root lists everything public.          |
+| `src/`          | The app (the binary), the library root, and the context package. The root lists everything public. |
 | `src/series/`   | `Series`, the one entry point of the library, and the SQLite index.                   |
 | `src/sources/`  | Import of subtitle files, and the subtitle parser.                                    |
-| `src/speakers/` | Speaker rules, the prompts for the external AI, and the suggestions from its answers. |
+| `src/speakers/` | Speaker rules.                                                                        |
+| `src/suggestions/` | Suggestions, the prompts for the external AI, and the suggestions from its answers. |
 | `prompts/`      | The prompt templates that the library fills in.                                       |
 | `tests/`        | Integration tests through `Series`.                                                   |
 | `testdata/`     | Sample subtitle files.                                                                |
@@ -78,3 +79,7 @@ The code is split by feature. A feature is a module with the same name as its di
 - The app calls only `Series` and the plain types that the library root exports.
 - Output from an external model is a suggestion. It is not stored as fact until the user approves it.
 - The design does not assume that a series is finished. A new episode can be added at any time.
+- Every claim from an external model has evidence, which is lines of a source.
+- A context package holds nothing from after its position.
+- The app never changes or ends story data. It only adds it.
+- The app calculates `since` when it rebuilds. No file stores it.

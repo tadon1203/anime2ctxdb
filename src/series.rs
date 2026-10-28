@@ -4,10 +4,12 @@ pub use index::EpisodeProgress;
 
 use index::Index;
 
-use crate::files::{enum_text, read_json, write_atomic};
+use crate::files::{read_json, write_atomic};
+use crate::model::Position;
+use crate::package;
 use crate::sources::{self, Source};
-use crate::speakers::prompt::{self, AnswerError, Prompt, PromptId, PromptKind};
-use crate::speakers::suggestion::{
+use crate::suggestions::prompt::{self, AnswerError, Prompt, PromptId, PromptKind};
+use crate::suggestions::suggestion::{
     self, Action, Content, Decision, Status, Suggestion, SuggestionId, SuggestionKind,
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -132,7 +134,7 @@ impl Series {
         let names: HashMap<String, String> = all
             .iter()
             .filter_map(|(suggestion, _)| match &suggestion.content {
-                Content::Character { name, .. } => Some((suggestion.id.0.clone(), name.clone())),
+                Content::Entity { name, .. } => Some((suggestion.id.0.clone(), name.clone())),
                 _ => None,
             })
             .collect();
@@ -148,7 +150,7 @@ impl Series {
             }
             let evidence = evidence_of(&index, &suggestion.content)?;
             rows.push(SuggestionRow {
-                content: content_of(&suggestion.content, &names),
+                content: suggestion.content.describe(&names),
                 id: suggestion.id,
                 kind,
                 evidence,
@@ -186,12 +188,12 @@ impl Series {
                         .get(&other.id)
                         .is_some_and(|s| s.status == Status::Approved && !s.blocked)
                 })
-                .filter_map(|other| data_key(&other.content))
+                .filter_map(|other| other.content.unique_key())
                 .collect();
             let key_taken = suggestions
                 .iter()
                 .find(|other| &other.id == id)
-                .and_then(|other| data_key(&other.content))
+                .and_then(|other| other.content.unique_key())
                 .is_some_and(|key| taken.contains(&key));
             let allowed = match action {
                 Action::Approve => {
@@ -228,14 +230,25 @@ impl Series {
         index.progress()
     }
 
-    /// Writes a new prompt file. It does not rebuild the index.
-    pub fn create_prompt(&self, kind: PromptKind, episode: u32) -> Result<Prompt> {
+    /// Makes the context package at one position, as YAML text. Nothing is saved.
+    pub fn build_package(&self, at: Position) -> Result<String> {
         let input = {
             let index = Index::open(&self.dir)?;
-            index.prompt_input(episode)?
+            index.package_input(at)?
         };
+        Ok(package::build(&input))
+    }
+
+    /// Writes a new prompt file. It does not rebuild the index.
+    pub fn create_prompt(&self, kind: PromptKind, episode: u32) -> Result<Prompt> {
+        let index = Index::open(&self.dir)?;
         let id = self.next_prompt_id()?;
-        let prompt = prompt::make(id, kind, episode, &input);
+        let prompt = match kind {
+            PromptKind::Speakers => {
+                prompt::speakers::make(id, episode, &index.speakers_input(episode)?)
+            }
+            PromptKind::Story => prompt::story::make(id, episode, &index.story_input(episode)?),
+        };
         let path = self.prompt_file(id);
         write_atomic(&path, &serde_json::to_string_pretty(&prompt)?)?;
         Ok(prompt)
@@ -288,52 +301,9 @@ impl Series {
 }
 
 fn evidence_of(index: &Index, content: &Content) -> Result<Vec<String>> {
-    match content {
-        Content::Character { evidence, .. } => evidence
-            .iter()
-            .map(|line| index.evidence_text(line))
-            .collect(),
-        Content::LineSpeaker { line, .. } => Ok(vec![index.evidence_text(line)?]),
-        Content::Label { .. } | Content::Color { .. } => Ok(Vec::new()),
-    }
-}
-
-fn content_of(content: &Content, names: &HashMap<String, String>) -> String {
-    let name_of = |id: &String| names.get(id).cloned().unwrap_or_else(|| id.clone());
-    match content {
-        Content::Character {
-            name,
-            reading: Some(reading),
-            ..
-        } => format!("character \"{name}\" ({reading})"),
-        Content::Character { name, .. } => format!("character \"{name}\""),
-        Content::Label {
-            label,
-            kind,
-            character,
-        } => {
-            let target = match character {
-                Some(id) => name_of(id),
-                None => enum_text(kind),
-            };
-            format!("label \"{label}\" -> {target}")
-        }
-        Content::Color { color, character } => {
-            format!("color #{color:06X} -> {}", name_of(character))
-        }
-        Content::LineSpeaker { characters, .. } if characters.is_empty() => "nobody".to_string(),
-        Content::LineSpeaker { characters, .. } => {
-            let names: Vec<String> = characters.iter().map(name_of).collect();
-            format!("speaker {}", names.join(", "))
-        }
-    }
-}
-
-/// The text that only one approved suggestion can hold: a label or a color.
-fn data_key(content: &Content) -> Option<String> {
-    match content {
-        Content::Label { label, .. } => Some(format!("label {label}")),
-        Content::Color { color, .. } => Some(format!("color {color}")),
-        Content::Character { .. } | Content::LineSpeaker { .. } => None,
-    }
+    content
+        .evidence_lines()
+        .iter()
+        .map(|line| index.evidence_text(line))
+        .collect()
 }

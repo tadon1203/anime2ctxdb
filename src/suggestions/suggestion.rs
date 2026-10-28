@@ -1,4 +1,4 @@
-use crate::files::{append_jsonl, read_jsonl};
+use crate::files::{append_jsonl, enum_text, read_jsonl};
 use crate::sources::ass::LineId;
 use crate::speakers::LabelKind;
 use anyhow::Result;
@@ -42,15 +42,45 @@ pub struct Suggestion {
     pub content: Content,
 }
 
-/// A reference to a character is a `CharacterId`. It can also be the `SuggestionId` of a new
-/// character in the same answer. Both hold the text of a `CharacterId`.
+/// One or more lines. A stored suggestion with no evidence cannot be read back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<LineId>", into = "Vec<LineId>")]
+pub struct Evidence(Vec<LineId>);
+
+impl Evidence {
+    /// `None` for an empty list.
+    pub fn new(lines: Vec<LineId>) -> Option<Evidence> {
+        (!lines.is_empty()).then_some(Evidence(lines))
+    }
+
+    pub fn lines(&self) -> &[LineId] {
+        &self.0
+    }
+}
+
+impl TryFrom<Vec<LineId>> for Evidence {
+    type Error = String;
+
+    fn try_from(lines: Vec<LineId>) -> Result<Evidence, String> {
+        Evidence::new(lines).ok_or_else(|| "evidence has no line".to_string())
+    }
+}
+
+impl From<Evidence> for Vec<LineId> {
+    fn from(evidence: Evidence) -> Vec<LineId> {
+        evidence.0
+    }
+}
+
+/// A reference to an entity is the text of an `EntityId`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Content {
-    Character {
+    Entity {
+        kind: String,
         name: String,
         reading: Option<String>,
-        evidence: Vec<LineId>,
+        evidence: Evidence,
     },
     Label {
         label: String,
@@ -65,15 +95,28 @@ pub enum Content {
         line: LineId,
         characters: Vec<String>,
     },
+    Fact {
+        entities: Vec<String>,
+        text: String,
+        evidence: Evidence,
+    },
+    Scene {
+        start: LineId,
+        end: LineId,
+        place: Option<String>,
+        summary: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SuggestionKind {
-    Character,
+    Entity,
     Label,
     Color,
     LineSpeaker,
+    Fact,
+    Scene,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,25 +152,97 @@ pub struct Review {
 impl Content {
     pub fn kind(&self) -> SuggestionKind {
         match self {
-            Content::Character { .. } => SuggestionKind::Character,
+            Content::Entity { .. } => SuggestionKind::Entity,
             Content::Label { .. } => SuggestionKind::Label,
             Content::Color { .. } => SuggestionKind::Color,
             Content::LineSpeaker { .. } => SuggestionKind::LineSpeaker,
+            Content::Fact { .. } => SuggestionKind::Fact,
+            Content::Scene { .. } => SuggestionKind::Scene,
         }
     }
 
     /// The suggestions that this suggestion refers to.
-    fn dependencies(&self) -> Vec<SuggestionId> {
-        let characters: Vec<&String> = match self {
-            Content::Character { .. } => Vec::new(),
+    pub fn dependencies(&self) -> Vec<SuggestionId> {
+        let entities: Vec<&String> = match self {
+            Content::Entity { .. } => Vec::new(),
             Content::Label { character, .. } => character.iter().collect(),
             Content::Color { character, .. } => vec![character],
             Content::LineSpeaker { characters, .. } => characters.iter().collect(),
+            Content::Fact { entities, .. } => entities.iter().collect(),
+            Content::Scene { place, .. } => place.iter().collect(),
         };
-        characters
+        entities
             .into_iter()
-            .map(|character| SuggestionId(character.clone()))
+            .map(|entity| SuggestionId(entity.clone()))
             .collect()
+    }
+
+    /// The lines that the suggestion is based on. Empty for a label and a color.
+    /// For a scene: its start line and its end line.
+    pub fn evidence_lines(&self) -> Vec<LineId> {
+        match self {
+            Content::Entity { evidence, .. } | Content::Fact { evidence, .. } => {
+                evidence.lines().to_vec()
+            }
+            Content::LineSpeaker { line, .. } => vec![line.clone()],
+            Content::Scene { start, end, .. } => vec![start.clone(), end.clone()],
+            Content::Label { .. } | Content::Color { .. } => Vec::new(),
+        }
+    }
+
+    /// For example `fact [明智あんな, 坂本みくる]: ...`. `names` maps an ID to an entity name.
+    pub fn describe(&self, names: &HashMap<String, String>) -> String {
+        let name_of = |id: &String| names.get(id).cloned().unwrap_or_else(|| id.clone());
+        match self {
+            Content::Entity {
+                kind,
+                name,
+                reading: Some(reading),
+                ..
+            } => format!("{kind} \"{name}\" ({reading})"),
+            Content::Entity { kind, name, .. } => format!("{kind} \"{name}\""),
+            Content::Label {
+                label,
+                kind,
+                character,
+            } => {
+                let target = match character {
+                    Some(id) => name_of(id),
+                    None => enum_text(kind),
+                };
+                format!("label \"{label}\" -> {target}")
+            }
+            Content::Color { color, character } => {
+                format!("color #{color:06X} -> {}", name_of(character))
+            }
+            Content::LineSpeaker { characters, .. } if characters.is_empty() => {
+                "nobody".to_string()
+            }
+            Content::LineSpeaker { characters, .. } => {
+                let names: Vec<String> = characters.iter().map(name_of).collect();
+                format!("speaker {}", names.join(", "))
+            }
+            Content::Fact { entities, text, .. } => {
+                let names: Vec<String> = entities.iter().map(name_of).collect();
+                format!("fact [{}]: {text}", names.join(", "))
+            }
+            Content::Scene { place, summary, .. } => match place {
+                Some(id) => format!("scene [{}]: {summary}", name_of(id)),
+                None => format!("scene: {summary}"),
+            },
+        }
+    }
+
+    /// The text that only one approved suggestion can hold: a label or a color.
+    pub fn unique_key(&self) -> Option<String> {
+        match self {
+            Content::Label { label, .. } => Some(format!("label {label}")),
+            Content::Color { color, .. } => Some(format!("color {color}")),
+            Content::Entity { .. }
+            | Content::LineSpeaker { .. }
+            | Content::Fact { .. }
+            | Content::Scene { .. } => None,
+        }
     }
 }
 
@@ -189,14 +304,16 @@ pub fn reviews(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::CHARACTER;
 
-    fn character(id: &str) -> Suggestion {
+    fn entity(id: &str) -> Suggestion {
         Suggestion {
             id: SuggestionId(id.to_string()),
-            content: Content::Character {
+            content: Content::Entity {
+                kind: CHARACTER.to_string(),
                 name: "n".to_string(),
                 reading: None,
-                evidence: vec![LineId("s:1".to_string())],
+                evidence: Evidence::new(vec![LineId("s:1".to_string())]).expect("one line"),
             },
         }
     }
@@ -221,7 +338,7 @@ mod tests {
 
     #[test]
     fn a_label_is_blocked_while_its_character_is_pending() {
-        let suggestions = [character("1-1"), label("1-2", "1-1")];
+        let suggestions = [entity("1-1"), label("1-2", "1-1")];
 
         let reviews = reviews(&suggestions, &[]);
 
@@ -234,7 +351,7 @@ mod tests {
 
     #[test]
     fn a_label_is_invalid_when_its_character_is_rejected() {
-        let suggestions = [character("1-1"), label("1-2", "1-1")];
+        let suggestions = [entity("1-1"), label("1-2", "1-1")];
         let decisions = [decide("1-1", Action::Reject)];
 
         let reviews = reviews(&suggestions, &decisions);
@@ -247,7 +364,7 @@ mod tests {
 
     #[test]
     fn the_last_decision_wins() {
-        let suggestions = [character("1-1")];
+        let suggestions = [entity("1-1")];
         let decisions = [
             decide("1-1", Action::Approve),
             decide("1-1", Action::Reject),
@@ -260,5 +377,11 @@ mod tests {
             reviews[&SuggestionId("1-1".to_string())].status,
             Status::Pending
         );
+    }
+
+    #[test]
+    fn evidence_cannot_be_empty() {
+        assert!(Evidence::new(Vec::new()).is_none());
+        assert!(Evidence::try_from(Vec::<LineId>::new()).is_err());
     }
 }

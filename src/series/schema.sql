@@ -17,26 +17,49 @@ CREATE TABLE lines (
     offscreen INTEGER NOT NULL,
     speaker_label TEXT
 );
-CREATE TABLE characters (
+CREATE TABLE entities (
     id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
     name TEXT NOT NULL,
     reading TEXT,
     since_episode INTEGER NOT NULL,
     since_ms INTEGER NOT NULL
 );
+CREATE TABLE facts (
+    id TEXT PRIMARY KEY,
+    text TEXT NOT NULL,
+    since_episode INTEGER NOT NULL,
+    since_ms INTEGER NOT NULL
+);
+CREATE TABLE fact_entities (
+    fact_id TEXT NOT NULL REFERENCES facts(id),
+    entity_id TEXT NOT NULL REFERENCES entities(id)
+);
+CREATE TABLE fact_evidence (
+    fact_id TEXT NOT NULL REFERENCES facts(id),
+    line_id TEXT NOT NULL REFERENCES lines(id)
+);
+CREATE TABLE scenes (
+    id TEXT PRIMARY KEY,
+    episode INTEGER NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    place_id TEXT REFERENCES entities(id),
+    summary TEXT NOT NULL
+);
 CREATE TABLE speaker_labels (
     label TEXT PRIMARY KEY,
     kind TEXT NOT NULL,
-    character_id TEXT REFERENCES characters(id)
+    entity_id TEXT REFERENCES entities(id)
 );
 CREATE TABLE speaker_colors (
     color INTEGER PRIMARY KEY,
-    character_id TEXT NOT NULL REFERENCES characters(id)
+    entity_id TEXT NOT NULL REFERENCES entities(id)
 );
--- character_id NULL: no speaker. Then method is NULL too.
+-- entity_id NULL: no speaker. Then method is NULL too.
 CREATE TABLE line_speakers (
     line_id TEXT NOT NULL REFERENCES lines(id),
-    character_id TEXT REFERENCES characters(id),
+    entity_id TEXT REFERENCES entities(id),
     method TEXT
 );
 CREATE TABLE suggestions (

@@ -1,17 +1,19 @@
 use crate::files::{enum_from_text, enum_text, read_json};
+use crate::model::{CHARACTER, Entity, EntityId, Position, format_clock};
+use crate::package::{PackageFact, PackageInput, PackageLine, PackageScene};
 use crate::sources::ass::{self, LineId};
 use crate::sources::{self, Language, Source, SourceId, SourceKind};
-use crate::speakers::prompt::{self, Prompt, PromptInput, PromptLine};
-use crate::speakers::suggestion::{self, Content, Review, Status, Suggestion, SuggestionId};
-use crate::speakers::{self, Character, CharacterId, Label, Speaker, SpeakerMethod};
+use crate::speakers::{self, Label, Speaker, SpeakerMethod};
+use crate::suggestions::prompt::{self, Prompt, PromptFact, PromptLine, SpeakersInput, StoryInput};
+use crate::suggestions::suggestion::{self, Content, Review, Status, Suggestion, SuggestionId};
 use anyhow::{Context, Result, anyhow, bail};
-use rusqlite::{Connection, OpenFlags, Transaction, params};
+use rusqlite::{Connection, OpenFlags, Row, Transaction, params};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The version of the tables in `schema.sql`. A different version means a full rebuild.
-pub const SCHEMA_VERSION: i32 = 1;
+pub const SCHEMA_VERSION: i32 = 2;
 
 const SCHEMA: &str = include_str!("schema.sql");
 
@@ -22,6 +24,16 @@ pub struct EpisodeProgress {
     pub has_subtitle: bool,
     /// `None` when there is no `Ja` subtitle.
     pub unknown_lines: Option<u32>,
+    /// The approved facts that start in this episode.
+    pub facts: u32,
+}
+
+/// Where a line is in its episode. A line is in the story at `end_ms`.
+#[derive(Debug, Clone, Copy)]
+struct LineTime {
+    episode: u32,
+    start_ms: u32,
+    end_ms: u32,
 }
 
 /// One line of an episode, from a `Ja` subtitle.
@@ -43,8 +55,8 @@ struct Data {
 /// The labels, colors, and line speakers that the approved suggestions set.
 struct ApprovedContent {
     labels: HashMap<String, Label>,
-    colors: HashMap<u32, CharacterId>,
-    line_speakers: HashMap<LineId, Vec<CharacterId>>,
+    colors: HashMap<u32, EntityId>,
+    line_speakers: HashMap<LineId, Vec<EntityId>>,
 }
 
 /// The SQLite index of one series. It holds no truth. The files hold it.
@@ -170,18 +182,24 @@ fn write_all(transaction: &Transaction<'_>, data: &Data) -> Result<()> {
         .iter()
         .filter(|suggestion| is_data(data.reviews[&suggestion.id]))
         .collect();
-    let line_index: HashMap<&LineId, (u32, u32)> = data
+    let line_index: HashMap<&LineId, LineTime> = data
         .lines
         .iter()
         .map(|episode_line| {
             (
                 &episode_line.id,
-                (episode_line.episode, episode_line.line.end_ms),
+                LineTime {
+                    episode: episode_line.episode,
+                    start_ms: episode_line.line.start_ms,
+                    end_ms: episode_line.line.end_ms,
+                },
             )
         })
         .collect();
 
-    insert_characters(transaction, &approved, &line_index)?;
+    insert_entities(transaction, &approved, &line_index)?;
+    insert_facts(transaction, &approved, &line_index)?;
+    insert_scenes(transaction, &approved, &line_index)?;
     let content = insert_approved_content(transaction, &approved, &line_index)?;
     insert_episode_speakers(transaction, &data.lines, &content)?;
     insert_suggestions(transaction, data)
@@ -225,41 +243,130 @@ fn insert_lines(transaction: &Transaction<'_>, lines: &[EpisodeLine]) -> Result<
     Ok(())
 }
 
-fn insert_characters(
+fn insert_entities(
     transaction: &Transaction<'_>,
     approved: &[&Suggestion],
-    line_index: &HashMap<&LineId, (u32, u32)>,
+    line_index: &HashMap<&LineId, LineTime>,
 ) -> Result<()> {
     for suggestion in approved {
-        if let Content::Character {
+        if let Content::Entity {
+            kind,
             name,
             reading,
-            evidence,
+            ..
         } = &suggestion.content
         {
-            let mut since: Option<(u32, u32)> = None;
-            for line in evidence {
-                let found = line_index
-                    .get(line)
-                    .copied()
-                    .ok_or_else(|| missing_line(&suggestion.id, line))?;
-                since = Some(since.map_or(found, |current| current.max(found)));
-            }
-            let (since_episode, since_ms) =
-                since.expect("a character has at least one evidence line");
+            let since = since_of(suggestion, line_index)?;
             transaction.execute(
-                "INSERT INTO characters VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![suggestion.id.0, name, reading, since_episode, since_ms],
+                "INSERT INTO entities VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    suggestion.id.0,
+                    kind,
+                    name,
+                    reading,
+                    since.episode,
+                    since.time_ms
+                ],
             )?;
         }
     }
     Ok(())
 }
 
+fn insert_facts(
+    transaction: &Transaction<'_>,
+    approved: &[&Suggestion],
+    line_index: &HashMap<&LineId, LineTime>,
+) -> Result<()> {
+    for suggestion in approved {
+        if let Content::Fact {
+            entities,
+            text,
+            evidence,
+        } = &suggestion.content
+        {
+            let since = since_of(suggestion, line_index)?;
+            transaction.execute(
+                "INSERT INTO facts VALUES (?1, ?2, ?3, ?4)",
+                params![suggestion.id.0, text, since.episode, since.time_ms],
+            )?;
+            for entity in entities {
+                transaction.execute(
+                    "INSERT INTO fact_entities VALUES (?1, ?2)",
+                    params![suggestion.id.0, entity],
+                )?;
+            }
+            for line in evidence.lines() {
+                transaction.execute(
+                    "INSERT INTO fact_evidence VALUES (?1, ?2)",
+                    params![suggestion.id.0, line.0],
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn insert_scenes(
+    transaction: &Transaction<'_>,
+    approved: &[&Suggestion],
+    line_index: &HashMap<&LineId, LineTime>,
+) -> Result<()> {
+    for suggestion in approved {
+        if let Content::Scene {
+            start,
+            end,
+            place,
+            summary,
+        } = &suggestion.content
+        {
+            let start_line = line_time(suggestion, start, line_index)?;
+            let end_line = line_time(suggestion, end, line_index)?;
+            transaction.execute(
+                "INSERT INTO scenes VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    suggestion.id.0,
+                    start_line.episode,
+                    start_line.start_ms,
+                    end_line.end_ms,
+                    place,
+                    summary
+                ],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// The position where the evidence of a suggestion is known: the latest end of its lines.
+fn since_of(suggestion: &Suggestion, line_index: &HashMap<&LineId, LineTime>) -> Result<Position> {
+    let mut since: Option<Position> = None;
+    for line in suggestion.content.evidence_lines() {
+        let found = line_time(suggestion, &line, line_index)?;
+        let position = Position {
+            episode: found.episode,
+            time_ms: found.end_ms,
+        };
+        since = Some(since.map_or(position, |current| current.max(position)));
+    }
+    Ok(since.expect("an entity or a fact has at least one evidence line"))
+}
+
+fn line_time(
+    suggestion: &Suggestion,
+    line: &LineId,
+    line_index: &HashMap<&LineId, LineTime>,
+) -> Result<LineTime> {
+    line_index
+        .get(line)
+        .copied()
+        .ok_or_else(|| missing_line(&suggestion.id, line))
+}
+
 fn insert_approved_content(
     transaction: &Transaction<'_>,
     approved: &[&Suggestion],
-    line_index: &HashMap<&LineId, (u32, u32)>,
+    line_index: &HashMap<&LineId, LineTime>,
 ) -> Result<ApprovedContent> {
     let mut content = ApprovedContent {
         labels: HashMap::new(),
@@ -281,7 +388,7 @@ fn insert_approved_content(
                     label.clone(),
                     Label {
                         kind: *kind,
-                        character: character.clone().map(CharacterId),
+                        character: character.clone().map(EntityId),
                     },
                 );
             }
@@ -290,9 +397,7 @@ fn insert_approved_content(
                     "INSERT INTO speaker_colors VALUES (?1, ?2)",
                     params![color, character],
                 )?;
-                content
-                    .colors
-                    .insert(*color, CharacterId(character.clone()));
+                content.colors.insert(*color, EntityId(character.clone()));
             }
             Content::LineSpeaker { line, characters } => {
                 if !line_index.contains_key(line) {
@@ -300,10 +405,10 @@ fn insert_approved_content(
                 }
                 content.line_speakers.insert(
                     line.clone(),
-                    characters.iter().cloned().map(CharacterId).collect(),
+                    characters.iter().cloned().map(EntityId).collect(),
                 );
             }
-            Content::Character { .. } => {}
+            Content::Entity { .. } | Content::Fact { .. } | Content::Scene { .. } => {}
         }
     }
     Ok(content)
@@ -428,10 +533,16 @@ impl Index {
             } else {
                 None
             };
+            let facts: u32 = self.connection.query_row(
+                "SELECT COUNT(*) FROM facts WHERE since_episode = ?1",
+                params![episode],
+                |row| row.get(0),
+            )?;
             progress.push(EpisodeProgress {
                 episode,
                 has_subtitle,
                 unknown_lines,
+                facts,
             });
         }
         Ok(progress)
@@ -482,12 +593,7 @@ impl Index {
         );
         match row {
             Ok((episode, start_ms, text)) => {
-                let seconds = start_ms / 1000;
-                Ok(format!(
-                    "E{episode} {:02}:{:02} {text}",
-                    seconds / 60,
-                    seconds % 60
-                ))
+                Ok(format!("E{episode} {} {text}", format_clock(start_ms)))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(format!("missing line {line}")),
             Err(error) => Err(error.into()),
@@ -495,16 +601,41 @@ impl Index {
     }
 
     /// The input of a Speakers prompt. It fails when the episode has no `Ja` subtitle.
-    pub fn prompt_input(&self, episode: u32) -> Result<PromptInput> {
-        let has_subtitle: bool = self.connection.query_row(
-            "SELECT COUNT(*) > 0 FROM sources WHERE episode = ?1 AND kind = 'subtitle' AND language = 'ja'",
-            params![episode],
-            |row| row.get(0),
-        )?;
-        if !has_subtitle {
-            bail!("episode {episode} has no Ja subtitle");
-        }
+    pub fn speakers_input(&self, episode: u32) -> Result<SpeakersInput> {
+        require_subtitle(&self.connection, episode)?;
+        let lines = self.prompt_lines(episode)?;
+        Ok(SpeakersInput {
+            lines,
+            entities: entities(&self.connection, Some(CHARACTER))?,
+            labels: unapproved_labels(&self.connection, episode)?,
+            colors: unapproved_colors(&self.connection, episode)?,
+        })
+    }
 
+    /// The input of a Story prompt. It fails when the episode has no `Ja` subtitle.
+    pub fn story_input(&self, episode: u32) -> Result<StoryInput> {
+        require_subtitle(&self.connection, episode)?;
+        Ok(StoryInput {
+            lines: self.prompt_lines(episode)?,
+            entities: entities(&self.connection, None)?,
+            facts: known_facts(&self.connection, episode)?,
+        })
+    }
+
+    /// The input of a context package at one position. It fails when the episode has no `Ja` subtitle.
+    pub fn package_input(&self, at: Position) -> Result<PackageInput> {
+        require_subtitle(&self.connection, at.episode)?;
+        Ok(PackageInput {
+            at,
+            entities: known_entities(&self.connection, at)?,
+            facts: package_facts(&self.connection, at)?,
+            scenes: package_scenes(&self.connection, at)?,
+            lines: package_lines(&self.connection, at)?,
+        })
+    }
+
+    /// The lines of one episode in time order, with their current speakers.
+    fn prompt_lines(&self, episode: u32) -> Result<Vec<PromptLine>> {
         let speakers = speakers_of_episode(&self.connection, episode)?;
         let mut statement = self.connection.prepare(
             "SELECT id, start_ms, color, speaker_label, text FROM lines WHERE episode = ?1 ORDER BY rowid",
@@ -532,23 +663,27 @@ impl Index {
                 })
             })
             .collect::<Result<Vec<PromptLine>>>()?;
-
-        let characters = characters(&self.connection)?;
-        let labels = unapproved_labels(&self.connection, episode)?;
-        let colors = unapproved_colors(&self.connection, episode)?;
-        Ok(PromptInput {
-            lines,
-            characters,
-            labels,
-            colors,
-        })
+        Ok(lines)
     }
+}
+
+/// Fails when the episode has no `Ja` subtitle. A prompt needs one.
+fn require_subtitle(connection: &Connection, episode: u32) -> Result<()> {
+    let has_subtitle: bool = connection.query_row(
+        "SELECT COUNT(*) > 0 FROM sources WHERE episode = ?1 AND kind = 'subtitle' AND language = 'ja'",
+        params![episode],
+        |row| row.get(0),
+    )?;
+    if !has_subtitle {
+        bail!("episode {episode} has no Ja subtitle");
+    }
+    Ok(())
 }
 
 /// The current speaker of each line of one episode. A line with no row is unknown.
 fn speakers_of_episode(connection: &Connection, episode: u32) -> Result<HashMap<String, Speaker>> {
     let mut statement = connection.prepare(
-        "SELECT s.line_id, s.character_id, s.method FROM line_speakers s
+        "SELECT s.line_id, s.entity_id, s.method FROM line_speakers s
          JOIN lines l ON l.id = s.line_id WHERE l.episode = ?1 ORDER BY s.rowid",
     )?;
     let rows = statement.query_map(params![episode], |row| {
@@ -559,14 +694,14 @@ fn speakers_of_episode(connection: &Connection, episode: u32) -> Result<HashMap<
         ))
     })?;
 
-    let mut grouped: BTreeMap<String, (Vec<CharacterId>, Option<SpeakerMethod>, bool)> =
+    let mut grouped: BTreeMap<String, (Vec<EntityId>, Option<SpeakerMethod>, bool)> =
         BTreeMap::new();
     for row in rows {
         let (line, character, method) = row?;
         let entry = grouped.entry(line).or_insert((Vec::new(), None, false));
         match character {
             Some(character) => {
-                entry.0.push(CharacterId(character));
+                entry.0.push(EntityId(character));
                 entry.1 = method.map(|text| enum_from_text(&text)).transpose()?;
             }
             None => entry.2 = true,
@@ -585,19 +720,178 @@ fn speakers_of_episode(connection: &Connection, episode: u32) -> Result<HashMap<
     Ok(speakers)
 }
 
-fn characters(connection: &Connection) -> Result<Vec<Character>> {
-    let mut statement = connection
-        .prepare("SELECT id, name, reading FROM characters ORDER BY since_episode, since_ms, id")?;
-    let characters = statement
-        .query_map([], |row| {
-            Ok(Character {
-                id: CharacterId(row.get(0)?),
-                name: row.get(1)?,
-                reading: row.get(2)?,
+/// The approved entities in the order they were added. `kind` `None` gives all kinds.
+fn entities(connection: &Connection, kind: Option<&str>) -> Result<Vec<Entity>> {
+    let mut statement = connection.prepare(
+        "SELECT id, kind, name, reading FROM entities
+         WHERE ?1 IS NULL OR kind = ?1 ORDER BY since_episode, since_ms, id",
+    )?;
+    let entities = statement
+        .query_map(params![kind], entity_from_row)?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(entities)
+}
+
+fn entity_from_row(row: &Row<'_>) -> rusqlite::Result<Entity> {
+    Ok(Entity {
+        id: EntityId(row.get(0)?),
+        kind: row.get(1)?,
+        name: row.get(2)?,
+        reading: row.get(3)?,
+    })
+}
+
+/// The entities that are known at the position. A later entity is left out.
+fn known_entities(connection: &Connection, at: Position) -> Result<Vec<Entity>> {
+    let mut statement = connection.prepare(
+        "SELECT id, kind, name, reading FROM entities
+         WHERE (since_episode, since_ms) <= (?1, ?2) ORDER BY since_episode, since_ms, id",
+    )?;
+    let entities = statement
+        .query_map(params![at.episode, at.time_ms], entity_from_row)?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(entities)
+}
+
+/// The facts that are known at the position, with their lines.
+fn package_facts(connection: &Connection, at: Position) -> Result<Vec<PackageFact>> {
+    let mut statement = connection.prepare(
+        "SELECT id, since_episode, since_ms, text FROM facts
+         WHERE (since_episode, since_ms) <= (?1, ?2) ORDER BY since_episode, since_ms, id",
+    )?;
+    let rows = statement
+        .query_map(params![at.episode, at.time_ms], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                Position {
+                    episode: row.get(1)?,
+                    time_ms: row.get(2)?,
+                },
+                row.get::<_, String>(3)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut entities_statement = connection
+        .prepare("SELECT entity_id FROM fact_entities WHERE fact_id = ?1 ORDER BY rowid")?;
+    let mut evidence_statement = connection.prepare(
+        "SELECT f.line_id FROM fact_evidence f JOIN lines l ON l.id = f.line_id
+         WHERE f.fact_id = ?1 ORDER BY l.episode, l.start_ms",
+    )?;
+    let mut facts = Vec::new();
+    for (id, since, text) in rows {
+        let entities = entities_statement
+            .query_map(params![id], |row| Ok(EntityId(row.get(0)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let evidence = evidence_statement
+            .query_map(params![id], |row| row.get::<_, String>(0))?
+            .map(|line| package_line(connection, &line?))
+            .collect::<Result<Vec<_>>>()?;
+        facts.push(PackageFact {
+            since,
+            entities,
+            text,
+            evidence,
+        });
+    }
+    Ok(facts)
+}
+
+/// The scenes that start at or before the position. A scene in progress is included.
+fn package_scenes(connection: &Connection, at: Position) -> Result<Vec<PackageScene>> {
+    let mut statement = connection.prepare(
+        "SELECT episode, start_ms, end_ms, place_id, summary FROM scenes
+         WHERE (episode, start_ms) <= (?1, ?2) ORDER BY episode, start_ms, id",
+    )?;
+    let scenes = statement
+        .query_map(params![at.episode, at.time_ms], |row| {
+            Ok(PackageScene {
+                episode: row.get(0)?,
+                start_ms: row.get(1)?,
+                end_ms: row.get(2)?,
+                place: row.get::<_, Option<String>>(3)?.map(EntityId),
+                summary: row.get(4)?,
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
-    Ok(characters)
+    Ok(scenes)
+}
+
+/// The lines of the episode that end at or before the position, in time order.
+fn package_lines(connection: &Connection, at: Position) -> Result<Vec<PackageLine>> {
+    let mut statement = connection
+        .prepare("SELECT id FROM lines WHERE episode = ?1 AND end_ms <= ?2 ORDER BY rowid")?;
+    let ids: Vec<String> = statement
+        .query_map(params![at.episode, at.time_ms], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    ids.iter().map(|id| package_line(connection, id)).collect()
+}
+
+/// One line with its speakers. A copied speaker is not a speaker of the package.
+fn package_line(connection: &Connection, id: &str) -> Result<PackageLine> {
+    let (episode, start_ms, text) = connection.query_row(
+        "SELECT episode, start_ms, text FROM lines WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok((
+                row.get::<_, u32>(0)?,
+                row.get::<_, u32>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        },
+    )?;
+    let mut statement = connection.prepare(
+        "SELECT entity_id FROM line_speakers
+         WHERE line_id = ?1 AND entity_id IS NOT NULL AND method IN ('label', 'color', 'ai')
+         ORDER BY rowid",
+    )?;
+    let speakers = statement
+        .query_map(params![id], |row| Ok(EntityId(row.get(0)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(PackageLine {
+        episode,
+        start_ms,
+        text,
+        speakers,
+    })
+}
+
+/// The approved facts that start before the episode, in time order.
+fn known_facts(connection: &Connection, episode: u32) -> Result<Vec<PromptFact>> {
+    let mut statement = connection.prepare(
+        "SELECT id, since_episode, since_ms, text FROM facts
+         WHERE since_episode < ?1 ORDER BY since_episode, since_ms, id",
+    )?;
+    let rows = statement
+        .query_map(params![episode], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u32>(1)?,
+                row.get::<_, u32>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut names = connection.prepare(
+        "SELECT e.name FROM fact_entities f JOIN entities e ON e.id = f.entity_id
+         WHERE f.fact_id = ?1 ORDER BY f.rowid",
+    )?;
+    let mut facts = Vec::new();
+    for (id, since_episode, since_ms, text) in rows {
+        let entities = names
+            .query_map(params![id], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        facts.push(PromptFact {
+            since: Position {
+                episode: since_episode,
+                time_ms: since_ms,
+            },
+            entities,
+            text,
+        });
+    }
+    Ok(facts)
 }
 
 /// The parts of the labels of one episode that have no approved label.

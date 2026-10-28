@@ -4,24 +4,24 @@ This document describes what the product does. It does not describe how.
 
 ## Purpose
 
-The product turns an anime (video, audio, and subtitles) into a context database for AI. A person uses the database to write fan fiction with an AI. The AI must not misread the characters. It must not describe things the story has not shown yet.
+The product turns an anime (video, audio, and subtitles) into a context database for AI. A person uses the database to write fan fiction with an AI. The AI must not misread the characters. It must not describe things the story has not shown yet. The context package is based on primary sources: the lines of the work.
 
 ## Input
 
-- Subtitle files (ASS) are the first input.
+- Subtitle files (ASS) are the first input. The product supports more kinds of sources later.
 - Audio and video are later inputs. They are equal sources, not extras.
 - The series can be finished or still airing.
 
 ## Output
 
-A context package: text that a person gives to an AI before it writes. The person chooses a point in the story (an episode and a time), the characters, and the place. The package holds what is true at that point:
+A context package: YAML text that a person gives to an AI before it writes. The person chooses a point in the story (an episode and a time). The package holds what the story shows up to that point:
 
-- the characters' traits, relationships, and speech style
-- who knows what
-- how characters call each other
-- places and appearances
+- the entities: characters, places, and other things
+- the scenes that ended before that point, and the scene in progress
+- the facts, each with its real lines
+- the lines of the current scene
 
-Every item has a source in the original work and a confidence. The package holds nothing from after the chosen point.
+The package holds nothing from after the chosen point. The AI that reads the package does the interpretation.
 
 ## What the user does
 
@@ -35,7 +35,7 @@ Every item has a source in the original work and a confidence. The package holds
 In scope:
 
 - read sources and extract speakers, characters, and scenes
-- keep facts and interpretations apart, each with its source
+- keep facts, each with its source; the reading AI does the interpretation
 - find and filter data by story point
 - build the context package
 - check a finished draft for contradictions with the data (rule-based)

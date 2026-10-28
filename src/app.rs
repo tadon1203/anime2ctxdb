@@ -1,6 +1,6 @@
 use anime2ctxdb::{
-    Action, EpisodeProgress, Language, Prompt, PromptId, PromptKind, Series, Source, SourceKind,
-    Status, SuggestionFilter, SuggestionId, SuggestionKind, SuggestionRow,
+    Action, EpisodeProgress, Language, Position, Prompt, PromptId, PromptKind, Series, Source,
+    SourceKind, Status, SuggestionFilter, SuggestionId, SuggestionKind, SuggestionRow, parse_clock,
 };
 use anyhow::Result;
 use eframe::egui;
@@ -13,6 +13,7 @@ const SUBTITLE_AND_VIDEO: [&str; 5] = ["ass", "mkv", "mp4", "webm", "avi"];
 enum JobOutput {
     Detected(Vec<Source>),
     Prompt(Prompt),
+    Package(String),
     Status(String),
 }
 
@@ -21,6 +22,7 @@ enum Tab {
     Sources,
     Suggestions,
     Prompts,
+    Package,
 }
 
 /// What a finished job clears from the view.
@@ -45,6 +47,9 @@ pub struct App {
     episode: Option<u32>,
     prompt: Option<Prompt>,
     answer: String,
+    package_episode: Option<u32>,
+    package_time: String,
+    package: Option<String>,
 }
 
 impl Default for App {
@@ -67,6 +72,9 @@ impl Default for App {
             episode: None,
             prompt: None,
             answer: String::new(),
+            package_episode: None,
+            package_time: "00:00".to_string(),
+            package: None,
         }
     }
 }
@@ -152,6 +160,10 @@ impl App {
                 self.status = "Prompt made. Copy it to an AI chat.".to_string();
                 self.prompt = Some(prompt);
             }
+            Ok(JobOutput::Package(text)) => {
+                self.status = "Package made. Copy it to an AI chat.".to_string();
+                self.package = Some(text);
+            }
             Ok(JobOutput::Status(message)) => {
                 match clear {
                     Some(ClearTarget::Detected) => self.detected.clear(),
@@ -219,6 +231,7 @@ impl App {
         self.prompt = None;
         self.answer.clear();
         self.episode = None;
+        self.package = None;
         self.status = "Series opened.".to_string();
         self.reload();
     }
@@ -255,14 +268,21 @@ impl App {
         });
     }
 
-    fn create_prompt(&mut self, ctx: &egui::Context, episode: u32) {
+    fn create_prompt(&mut self, ctx: &egui::Context, kind: PromptKind, episode: u32) {
         let Some(series) = self.series.clone() else {
             return;
         };
         self.start(ctx, move || {
-            series
-                .create_prompt(PromptKind::Speakers, episode)
-                .map(JobOutput::Prompt)
+            series.create_prompt(kind, episode).map(JobOutput::Prompt)
+        });
+    }
+
+    fn create_package(&mut self, ctx: &egui::Context, at: Position) {
+        let Some(series) = self.series.clone() else {
+            return;
+        };
+        self.start(ctx, move || {
+            series.build_package(at).map(JobOutput::Package)
         });
     }
 
@@ -294,6 +314,7 @@ impl App {
             let suggestions = format!("Suggestions ({})", self.rows.len());
             ui.selectable_value(&mut self.tab, Tab::Suggestions, suggestions);
             ui.selectable_value(&mut self.tab, Tab::Prompts, "Prompts");
+            ui.selectable_value(&mut self.tab, Tab::Package, "Package");
         });
         if self.busy() {
             ui.label("Working...");
@@ -305,6 +326,7 @@ impl App {
             Tab::Sources => self.sources_tab(ui),
             Tab::Suggestions => self.suggestions_tab(ui),
             Tab::Prompts => self.prompts_tab(ui),
+            Tab::Package => self.package_tab(ui),
         }
     }
 
@@ -396,10 +418,12 @@ impl App {
                 .show_ui(ui, |ui| {
                     for option in [
                         None,
-                        Some(SuggestionKind::Character),
+                        Some(SuggestionKind::Entity),
                         Some(SuggestionKind::Label),
                         Some(SuggestionKind::Color),
                         Some(SuggestionKind::LineSpeaker),
+                        Some(SuggestionKind::Fact),
+                        Some(SuggestionKind::Scene),
                     ] {
                         ui.selectable_value(
                             &mut self.filter.kind,
@@ -482,7 +506,7 @@ impl App {
         let ctx = ui.ctx().clone();
 
         egui::Grid::new("progress").striped(true).show(ui, |ui| {
-            for heading in ["episode", "subtitle", "speakers"] {
+            for heading in ["episode", "subtitle", "speakers", "facts"] {
                 ui.label(heading);
             }
             ui.end_row();
@@ -495,6 +519,7 @@ impl App {
                     Some(count) => format!("{count} lines unknown"),
                 };
                 ui.label(speakers);
+                ui.label(item.facts.to_string());
                 ui.end_row();
             }
         });
@@ -505,7 +530,7 @@ impl App {
             .filter(|item| item.has_subtitle)
             .map(|item| item.episode)
             .collect();
-        let new_prompt = ui
+        let (new_speakers, new_story) = ui
             .horizontal(|ui| {
                 let selected = self
                     .episode
@@ -521,11 +546,14 @@ impl App {
                             );
                         }
                     });
-                ui.add_enabled(
-                    !busy && self.episode.is_some(),
-                    egui::Button::new("New Speakers prompt"),
-                )
-                .clicked()
+                let enabled = !busy && self.episode.is_some();
+                let speakers = ui
+                    .add_enabled(enabled, egui::Button::new("New Speakers prompt"))
+                    .clicked();
+                let story = ui
+                    .add_enabled(enabled, egui::Button::new("New Story prompt"))
+                    .clicked();
+                (speakers, story)
             })
             .inner;
 
@@ -558,8 +586,11 @@ impl App {
             ctx.copy_text(prompt.text.clone());
             self.status = "Copied the prompt.".to_string();
         }
-        if let Some(episode) = self.episode.filter(|_| new_prompt) {
-            self.create_prompt(&ctx, episode);
+        if let Some(episode) = self.episode.filter(|_| new_speakers) {
+            self.create_prompt(&ctx, PromptKind::Speakers, episode);
+        }
+        if let Some(episode) = self.episode.filter(|_| new_story) {
+            self.create_prompt(&ctx, PromptKind::Story, episode);
         }
         if let Some(prompt) = self
             .prompt
@@ -569,6 +600,63 @@ impl App {
         {
             let answer = self.answer.clone();
             self.submit(&ctx, prompt, answer);
+        }
+    }
+
+    fn package_tab(&mut self, ui: &mut egui::Ui) {
+        let busy = self.busy();
+        let ctx = ui.ctx().clone();
+        let subtitle_episodes: Vec<u32> = self
+            .progress
+            .iter()
+            .filter(|item| item.has_subtitle)
+            .map(|item| item.episode)
+            .collect();
+
+        let generate = ui
+            .horizontal(|ui| {
+                let selected = self
+                    .package_episode
+                    .map_or("-".to_string(), |episode| episode.to_string());
+                egui::ComboBox::from_id_salt("package-episode")
+                    .selected_text(selected)
+                    .show_ui(ui, |ui| {
+                        for episode in &subtitle_episodes {
+                            ui.selectable_value(
+                                &mut self.package_episode,
+                                Some(*episode),
+                                episode.to_string(),
+                            );
+                        }
+                    });
+                ui.label("Time (mm:ss)");
+                ui.add(egui::TextEdit::singleline(&mut self.package_time).desired_width(80.0));
+                ui.add_enabled(
+                    !busy && self.package_episode.is_some(),
+                    egui::Button::new("Generate"),
+                )
+                .clicked()
+            })
+            .inner;
+
+        if let Some(episode) = self.package_episode.filter(|_| generate) {
+            match parse_clock(&self.package_time) {
+                Ok(time_ms) => self.create_package(&ctx, Position { episode, time_ms }),
+                Err(error) => self.error = Some(format!("{error:#}")),
+            }
+        }
+
+        if let Some(text) = &self.package {
+            let mut shown = text.as_str();
+            ui.add(
+                egui::TextEdit::multiline(&mut shown)
+                    .desired_rows(20)
+                    .desired_width(f32::INFINITY),
+            );
+            if ui.add_enabled(!busy, egui::Button::new("Copy")).clicked() {
+                ctx.copy_text(text.clone());
+                self.status = "Copied the package.".to_string();
+            }
         }
     }
 }
@@ -703,9 +791,11 @@ fn kind_filter_text(kind: Option<SuggestionKind>) -> &'static str {
 
 fn suggestion_kind_text(kind: SuggestionKind) -> &'static str {
     match kind {
-        SuggestionKind::Character => "character",
+        SuggestionKind::Entity => "entity",
         SuggestionKind::Label => "label",
         SuggestionKind::Color => "color",
         SuggestionKind::LineSpeaker => "line_speaker",
+        SuggestionKind::Fact => "fact",
+        SuggestionKind::Scene => "scene",
     }
 }
