@@ -15,7 +15,8 @@ CREATE TABLE lines (
     text TEXT NOT NULL,
     color INTEGER,
     offscreen INTEGER NOT NULL,
-    speaker_label TEXT
+    speaker_label TEXT,
+    prompt_text TEXT NOT NULL
 );
 CREATE TABLE entities (
     id TEXT PRIMARY KEY,

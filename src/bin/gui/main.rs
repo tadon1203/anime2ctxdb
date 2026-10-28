@@ -2,15 +2,12 @@
 
 mod app;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use fs4::{FileExt, TryLockError};
 use std::fs::{self, OpenOptions};
 
 fn main() -> Result<()> {
-    let Some(data_dir) = dirs::data_local_dir() else {
-        bail!("no local data directory on this system");
-    };
-    let app_dir = data_dir.join("anime2ctxdb");
+    let app_dir = anime2ctxdb::app_data_dir()?;
     fs::create_dir_all(&app_dir).with_context(|| format!("cannot create {}", app_dir.display()))?;
 
     // The lock lives until the process ends. A second instance cannot get it.
@@ -37,11 +34,7 @@ fn main() -> Result<()> {
         }
     }
 
-    let exe_path = std::env::current_exe().context("cannot find the executable")?;
-    let Some(exe_dir) = exe_path.parent() else {
-        bail!("the executable {} has no directory", exe_path.display());
-    };
-    let series_root = exe_dir.join("series");
+    let series_root = app_dir;
 
     eframe::run_native(
         "anime2ctxdb",

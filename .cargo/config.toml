@@ -1,2 +1,6 @@
+[build]
+# Store build output in a folder for this project only.
+target-dir = "C:/cargo-targets/anime2ctxdb"
+
 [target.x86_64-pc-windows-msvc]
 linker = "lld-link"

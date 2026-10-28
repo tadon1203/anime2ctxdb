@@ -29,6 +29,22 @@ pub struct Line {
     pub offscreen: bool,
     /// The label in full-width parentheses at the start of the text, for example "あんな・みくる".
     pub speaker_label: Option<String>,
+    /// The rows that `text` joins, in order.
+    pub rows: Vec<String>,
+    /// The ruby (furigana) rows that have the start time of this line.
+    pub ruby: Vec<String>,
+}
+
+impl Line {
+    /// The text for a prompt: the rows split by " / ", then the ruby as reading hints.
+    pub fn prompt_text(&self) -> String {
+        let text = self.rows.join(" / ");
+        if self.ruby.is_empty() {
+            text
+        } else {
+            format!("{text} (ruby: {})", self.ruby.join(", "))
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -55,6 +71,7 @@ pub fn parse(text: &str) -> Result<Vec<Line>, AssError> {
     let mut format: Option<Vec<&str>> = None;
     let mut dialogue_count: u32 = 0;
     let mut lines: Vec<Line> = Vec::new();
+    let mut pending_ruby: Vec<(u32, String)> = Vec::new();
 
     for (number, raw) in text.lines().enumerate() {
         let trimmed = raw.trim();
@@ -75,7 +92,7 @@ pub fn parse(text: &str) -> Result<Vec<Line>, AssError> {
             let line_number = number + 1;
             let (start_ms, end_ms, body) =
                 split_dialogue(rest, fields).ok_or(AssError::InvalidDialogue { line_number })?;
-            add_dialogue(&mut lines, index, start_ms, end_ms, body);
+            add_dialogue(&mut lines, &mut pending_ruby, index, start_ms, end_ms, body);
         }
     }
 
@@ -120,8 +137,22 @@ fn parse_time(text: &str) -> Option<u32> {
 }
 
 /// Adds one `Dialogue` to `lines`. It merges into the previous line when the times and color match.
-fn add_dialogue(lines: &mut Vec<Line>, index: u32, start_ms: u32, end_ms: u32, raw: &str) {
+///
+/// A ruby `Dialogue` comes before its base text. It waits in `pending_ruby` for the next line with the same start time.
+fn add_dialogue(
+    lines: &mut Vec<Line>,
+    pending_ruby: &mut Vec<(u32, String)>,
+    index: u32,
+    start_ms: u32,
+    end_ms: u32,
+    raw: &str,
+) {
     if is_ruby(raw) {
+        let ruby = TAG.replace_all(raw, "");
+        let ruby = ruby.trim();
+        if !ruby.is_empty() {
+            pending_ruby.push((start_ms, ruby.to_string()));
+        }
         return;
     }
     let color = COLOR
@@ -136,6 +167,8 @@ fn add_dialogue(lines: &mut Vec<Line>, index: u32, start_ms: u32, end_ms: u32, r
         return;
     }
     let (speaker_label, text) = split_label(text);
+    pending_ruby.retain(|(ruby_start, _)| *ruby_start == start_ms);
+    let ruby: Vec<String> = pending_ruby.drain(..).map(|(_, ruby)| ruby).collect();
 
     if speaker_label.is_none()
         && let Some(last) = lines.last_mut()
@@ -144,11 +177,13 @@ fn add_dialogue(lines: &mut Vec<Line>, index: u32, start_ms: u32, end_ms: u32, r
         && last.color == color
     {
         if last.text.is_empty() {
-            last.text = text;
+            last.text.clone_from(&text);
         } else {
             last.text = format!("{} {}", last.text, text);
         }
         last.offscreen |= offscreen;
+        last.rows.push(text);
+        last.ruby.extend(ruby);
         return;
     }
 
@@ -156,10 +191,16 @@ fn add_dialogue(lines: &mut Vec<Line>, index: u32, start_ms: u32, end_ms: u32, r
         index,
         start_ms,
         end_ms,
+        rows: if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![text.clone()]
+        },
         text,
         color,
         offscreen,
         speaker_label,
+        ruby,
     });
 }
 
@@ -274,6 +315,34 @@ mod tests {
         assert_eq!(lines[0].text, "わたし 持つ");
         assert_eq!(lines[0].speaker_label.as_deref(), Some("あんな"));
         assert_eq!(lines[0].index, 0);
+    }
+
+    #[test]
+    fn merged_rows_are_split_in_the_prompt_text() {
+        let text = document(&[
+            &dialogue("0:00:01.00", "0:00:02.00", "（女の子）ウッ"),
+            &dialogue("0:00:01.00", "0:00:02.00", "迷子かな"),
+        ]);
+
+        let lines = parse(&text).expect("the subtitle parses");
+
+        assert_eq!(lines[0].text, "ウッ 迷子かな");
+        assert_eq!(lines[0].prompt_text(), "ウッ / 迷子かな");
+    }
+
+    #[test]
+    fn ruby_waits_for_the_next_row_with_the_same_start_time() {
+        let text = document(&[
+            &dialogue("0:00:01.00", "0:00:02.00", r"{\fscx50\fscy50}あけち"),
+            &dialogue("0:00:01.00", "0:00:02.00", "（明智あんな）わたし"),
+            &dialogue("0:00:03.00", "0:00:04.00", r"{\fscx50\fscy50}ほか"),
+            &dialogue("0:00:05.00", "0:00:06.00", "later"),
+        ]);
+
+        let lines = parse(&text).expect("the subtitle parses");
+
+        assert_eq!(lines[0].prompt_text(), "わたし (ruby: あけち)");
+        assert_eq!(lines[1].prompt_text(), "later");
     }
 
     #[test]

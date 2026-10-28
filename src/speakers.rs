@@ -159,6 +159,8 @@ mod tests {
             color,
             offscreen: false,
             speaker_label: label.map(str::to_string),
+            rows: vec!["text".to_string()],
+            ruby: Vec::new(),
         }
     }
 

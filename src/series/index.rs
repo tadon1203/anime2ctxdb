@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The version of the tables in `schema.sql`. A different version means a full rebuild.
-pub const SCHEMA_VERSION: i32 = 2;
+pub const SCHEMA_VERSION: i32 = 3;
 
 const SCHEMA: &str = include_str!("schema.sql");
 
@@ -226,7 +226,7 @@ fn insert_lines(transaction: &Transaction<'_>, lines: &[EpisodeLine]) -> Result<
     for episode_line in lines {
         let line = &episode_line.line;
         transaction.execute(
-            "INSERT INTO lines VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO lines VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 episode_line.id.0,
                 episode_line.source_id.0,
@@ -237,6 +237,7 @@ fn insert_lines(transaction: &Transaction<'_>, lines: &[EpisodeLine]) -> Result<
                 line.color,
                 line.offscreen,
                 line.speaker_label,
+                line.prompt_text(),
             ],
         )?;
     }
@@ -656,7 +657,7 @@ impl Index {
     fn episode_lines(&self, episode: u32) -> Result<Vec<PromptLine>> {
         let speakers = speakers_of_episode(&self.connection, episode)?;
         let mut statement = self.connection.prepare(
-            "SELECT id, start_ms, color, speaker_label, text FROM lines WHERE episode = ?1 ORDER BY rowid",
+            "SELECT id, start_ms, color, speaker_label, prompt_text FROM lines WHERE episode = ?1 ORDER BY rowid",
         )?;
         let lines = statement
             .query_map(params![episode], |row| {

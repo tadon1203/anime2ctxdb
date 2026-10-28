@@ -13,8 +13,9 @@ use crate::suggestions::suggestion::{
     self, Action, Content, Decision, Status, Suggestion, SuggestionId, SuggestionKind,
 };
 use anyhow::{Context, Result, bail, ensure};
+use fs4::FileExt;
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 
 /// A series directory. It holds only its path, so it can be cloned and sent to a thread.
@@ -60,6 +61,13 @@ pub struct SuggestionRow {
     pub evidence: Vec<String>,
     pub status: Status,
     pub blocked: bool,
+}
+
+/// A prompt file and whether it has an answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptRow {
+    pub prompt: Prompt,
+    pub answered: bool,
 }
 
 /// How many suggestions a call changed and how many it skipped.
@@ -130,7 +138,7 @@ impl Series {
         for name in SERIES_ENTRIES {
             ensure!(
                 dir.join(name).exists(),
-                "{} is not a series folder: {name} is missing. Use New series to make a series.",
+                "{} is not a series folder: {name} is missing.",
                 dir.display()
             );
         }
@@ -174,6 +182,7 @@ impl Series {
     }
 
     pub fn add_sources(&self, records: &[Source]) -> Result<()> {
+        let _lock = write_lock(&self.dir)?;
         sources::add(&self.dir, records)?;
         Index::rebuild(&self.dir)
     }
@@ -219,6 +228,7 @@ impl Series {
 
     /// Applies the decisions in the given order. A decision on a suggestion that cannot take it is skipped.
     pub fn decide(&self, ids: &[SuggestionId], action: Action) -> Result<Decided> {
+        let _lock = write_lock(&self.dir)?;
         let all = {
             let index = Index::open(&self.dir)?;
             index.suggestions()?
@@ -295,12 +305,38 @@ impl Series {
         Ok(package::build(&input))
     }
 
+    /// Lists the prompt files by ID, and says which ones have an answer.
+    pub fn prompts(&self) -> Result<Vec<PromptRow>> {
+        let directory = self.dir.join("prompts");
+        let entries = fs::read_dir(&directory)
+            .with_context(|| format!("cannot read {}", directory.display()))?;
+        let mut rows = Vec::new();
+        for entry in entries {
+            let path = entry
+                .with_context(|| format!("cannot read {}", directory.display()))?
+                .path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+                let prompt: Prompt = read_json(&path)?;
+                let answered = self.answer_file(prompt.id).exists();
+                rows.push(PromptRow { prompt, answered });
+            }
+        }
+        rows.sort_by_key(|row| row.prompt.id);
+        Ok(rows)
+    }
+
+    /// Reads one prompt file.
+    pub fn prompt(&self, id: PromptId) -> Result<Prompt> {
+        read_json(&self.prompt_file(id))
+    }
+
     /// Writes a new prompt file for one or more episodes. It does not rebuild the index.
     pub fn create_prompt(&self, kind: PromptKind, episodes: &[u32]) -> Result<Prompt> {
         let mut episodes = episodes.to_vec();
         episodes.sort_unstable();
         episodes.dedup();
         ensure!(!episodes.is_empty(), "a prompt needs at least one episode");
+        let _lock = write_lock(&self.dir)?;
         let index = Index::open(&self.dir)?;
         let id = self.next_prompt_id()?;
         let prompt = match kind {
@@ -316,6 +352,7 @@ impl Series {
 
     /// Reads the answer, writes its JSON part, and rebuilds the index.
     pub fn submit_answer(&self, prompt_id: PromptId, text: &str) -> Result<usize> {
+        let _lock = write_lock(&self.dir)?;
         let answer_path = self.answer_file(prompt_id);
         ensure!(
             !answer_path.exists(),
@@ -358,6 +395,20 @@ impl Series {
         }
         Ok(PromptId(largest + 1))
     }
+}
+
+/// Takes the write lock of the series in `dir`. The lock lasts until the returned file is dropped.
+/// The lock is a file in the series folder. The OS frees it when the process ends, even after a crash.
+fn write_lock(dir: &Path) -> Result<File> {
+    let path = dir.join("series.lock");
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .with_context(|| format!("cannot open {}", path.display()))?;
+    FileExt::lock(&file).with_context(|| format!("cannot lock {}", path.display()))?;
+    Ok(file)
 }
 
 fn evidence_of(index: &Index, content: &Content) -> Result<Vec<String>> {
