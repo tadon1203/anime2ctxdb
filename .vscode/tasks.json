@@ -5,7 +5,7 @@
             "label": "run",
             "type": "shell",
             "command": "cargo",
-            "args": ["run"],
+            "args": ["run", "--bin", "anime2ctxdb-gui"],
             "group": "none",
             "problemMatcher": ["$rustc"]
         },
@@ -13,7 +13,7 @@
             "label": "run: release",
             "type": "shell",
             "command": "cargo",
-            "args": ["run", "--release"],
+            "args": ["run", "--release", "--bin", "anime2ctxdb-gui"],
             "group": "none",
             "problemMatcher": ["$rustc"]
         },
