@@ -29,6 +29,7 @@ The package holds nothing from after the chosen point. The AI that reads the pac
 - The user approves or rejects suggestions from the product.
 - The user copies prompts to an external AI tool and pastes the answers back.
 - The user never enters story data by hand. The user can correct the episode and the language of an imported file.
+- The user can remove an imported file from the series. The product asks first. The product keeps a subtitle that a prompt or an answer uses, because they point to its lines. The original file stays.
 
 ## Scope
 

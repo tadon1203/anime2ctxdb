@@ -1,4 +1,4 @@
-use crate::files::{append_jsonl, read_jsonl};
+use crate::files::{append_jsonl, read_jsonl, write_atomic};
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -408,6 +408,60 @@ pub(crate) fn add(series_dir: &Path, records: &[Source]) -> Result<()> {
         }
     }
     append_jsonl(&series_dir.join("sources.jsonl"), records)
+}
+
+/// The sources in `ids` that a prompt or an answer uses. A prompt or an answer has the ID of
+/// each source whose lines it uses, so a search for the ID in their text finds them.
+pub(crate) fn find_used(series_dir: &Path, ids: &[SourceId]) -> Result<Vec<SourceId>> {
+    let mut texts = Vec::new();
+    for name in ["prompts", "answers"] {
+        let directory = series_dir.join(name);
+        let entries = fs::read_dir(&directory)
+            .with_context(|| format!("cannot read {}", directory.display()))?;
+        for entry in entries {
+            let path = entry
+                .with_context(|| format!("cannot read {}", directory.display()))?
+                .path();
+            texts.push(
+                fs::read_to_string(&path)
+                    .with_context(|| format!("cannot read {}", path.display()))?,
+            );
+        }
+    }
+    Ok(ids
+        .iter()
+        .filter(|id| texts.iter().any(|text| text.contains(&id.0)))
+        .cloned()
+        .collect())
+}
+
+/// Removes the records in `ids` and the copies of their subtitles. Returns how many records it
+/// removed. The original files stay.
+pub(crate) fn remove(series_dir: &Path, ids: &[SourceId]) -> Result<usize> {
+    let saved = load(series_dir)?;
+    let (removed, kept): (Vec<Source>, Vec<Source>) = saved
+        .into_iter()
+        .partition(|record| ids.contains(&record.id));
+    let mut text = String::new();
+    for record in &kept {
+        text.push_str(&serde_json::to_string(record)?);
+        text.push('\n');
+    }
+    write_atomic(&series_dir.join("sources.jsonl"), &text)?;
+
+    // A copy that stays by mistake does no harm, because no record points to it.
+    for record in removed
+        .iter()
+        .filter(|record| record.kind == SourceKind::Subtitle)
+    {
+        let copy = series_dir
+            .join("sources")
+            .join(format!("{}.ass", record.id));
+        if copy.exists() {
+            fs::remove_file(&copy).with_context(|| format!("cannot remove {}", copy.display()))?;
+        }
+    }
+    Ok(removed.len())
 }
 
 /// Reads a subtitle file as UTF-8 and removes the BOM.

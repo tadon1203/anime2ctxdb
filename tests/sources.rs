@@ -1,4 +1,6 @@
-use anime2ctxdb::{EpisodeOrigin, Language, Series, Severity, SourceKind};
+use anime2ctxdb::{
+    EpisodeOrigin, Language, PromptKind, Removed, Series, Severity, SourceId, SourceKind,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -360,6 +362,106 @@ fn index_is_built_again_after_it_is_deleted() {
 
     assert_eq!(reopened.sources().expect("the sources load").len(), 1);
     assert!(root.join("index.sqlite").exists());
+}
+
+#[test]
+fn remove_deletes_the_record_and_the_copy_but_not_the_original() {
+    let inputs = TempDir::new().expect("a temporary directory");
+    let root = inputs.path().join("show");
+    let series = Series::create(&root).expect("the series is created");
+    let subtitle = copy_subtitle(inputs.path(), "Show - 01.ass");
+    let video = write_video(inputs.path(), "Show - 01.mkv");
+    let records = series
+        .read_files(&[subtitle.clone(), video.clone()])
+        .expect("the files are read");
+    series.add_sources(&records).expect("the sources are added");
+    let copy = root.join("sources").join(format!("{}.ass", records[0].id));
+    assert!(copy.exists());
+
+    let ids = [records[0].id.clone(), records[1].id.clone()];
+    let removed = series
+        .remove_sources(&ids)
+        .expect("the sources are removed");
+
+    assert_eq!(
+        removed,
+        Removed {
+            removed: 2,
+            blocked: 0
+        }
+    );
+    assert_eq!(series.sources().expect("the sources load").len(), 0);
+    assert!(!copy.exists());
+    assert!(subtitle.exists());
+    assert!(video.exists());
+    assert!(
+        series
+            .progress()
+            .expect("the progress loads")
+            .iter()
+            .all(|item| !item.has_subtitle)
+    );
+}
+
+#[test]
+fn remove_keeps_a_source_that_a_prompt_uses() {
+    let root = TempDir::new().expect("a temporary directory");
+    let series = new_series(&root);
+    let first = copy_subtitle(root.path(), "Show - 01.ass");
+    let second = copy_other_subtitle(root.path(), "Show - 02.ass");
+    let records = series
+        .read_files(&[first, second])
+        .expect("the files are read");
+    series.add_sources(&records).expect("the sources are added");
+    let saved = series.sources().expect("the sources load");
+    series
+        .create_prompt(PromptKind::Story, &[1])
+        .expect("the prompt is created");
+    let ids: Vec<SourceId> = saved.iter().map(|record| record.id.clone()).collect();
+
+    let blocked = series.blocked_removals(&ids).expect("the check runs");
+    let removed = series
+        .remove_sources(&ids)
+        .expect("the sources are removed");
+
+    assert_eq!(blocked, [ids[0].clone()]);
+    assert_eq!(
+        removed,
+        Removed {
+            removed: 1,
+            blocked: 1
+        }
+    );
+    let left = series.sources().expect("the sources load");
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].id, ids[0]);
+    assert!(
+        root.path()
+            .join("show")
+            .join("sources")
+            .join(format!("{}.ass", ids[0]))
+            .exists()
+    );
+}
+
+#[test]
+fn a_removed_file_can_be_imported_again() {
+    let inputs = TempDir::new().expect("a temporary directory");
+    let series = new_series(&inputs);
+    let subtitle = copy_subtitle(inputs.path(), "Show - 01.ass");
+    let records = series
+        .read_files(std::slice::from_ref(&subtitle))
+        .expect("the file is read");
+    series.add_sources(&records).expect("the sources are added");
+    series
+        .remove_sources(&[records[0].id.clone()])
+        .expect("the source is removed");
+
+    series
+        .add_sources(&records)
+        .expect("the file is imported again");
+
+    assert_eq!(series.sources().expect("the sources load").len(), 1);
 }
 
 #[test]

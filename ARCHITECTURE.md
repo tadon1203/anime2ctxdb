@@ -78,6 +78,7 @@ The code is split by feature. A feature is a module with the same name as its di
 - The app has no network code. It writes prompts and reads answers. The user copies the prompts to an external tool and pastes the answers back.
 - The source of truth is plain files. A database is an index that the app can build again from them.
 - Source files never change, and the app never changes a file that the user imported. Derived data records its source and a version.
+- The app appends to `sources.jsonl`. Only a source removal rewrites it, through a temporary file. A source that a prompt or an answer uses cannot be removed, because their line IDs point to it.
 - The app calls only `Series` and the plain types that the library root exports.
 - Output from an external model is a suggestion. It is not stored as fact until the user approves it.
 - The design does not assume that a series is finished. A new episode can be added at any time.

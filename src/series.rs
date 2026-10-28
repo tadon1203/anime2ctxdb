@@ -7,7 +7,7 @@ use index::Index;
 use crate::files::{read_json, write_atomic};
 use crate::model::Position;
 use crate::package;
-use crate::sources::{self, Problem, Scan, Source};
+use crate::sources::{self, Problem, Scan, Source, SourceId};
 use crate::suggestions::prompt::{self, AnswerError, Prompt, PromptId, PromptKind};
 use crate::suggestions::suggestion::{
     self, Action, Content, Decision, Status, Suggestion, SuggestionId, SuggestionKind,
@@ -75,6 +75,13 @@ pub struct PromptRow {
 pub struct Decided {
     pub applied: usize,
     pub skipped: usize,
+}
+
+/// How many sources a call removed and how many it kept because a prompt or an answer uses them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Removed {
+    pub removed: usize,
+    pub blocked: usize,
 }
 
 impl Series {
@@ -189,6 +196,31 @@ impl Series {
 
     pub fn sources(&self) -> Result<Vec<Source>> {
         sources::load(&self.dir)
+    }
+
+    /// The sources in `ids` that a prompt or an answer uses. `remove_sources` keeps them.
+    pub fn blocked_removals(&self, ids: &[SourceId]) -> Result<Vec<SourceId>> {
+        sources::find_used(&self.dir, ids)
+    }
+
+    /// Removes the sources in `ids` and the copies of their subtitles. A source that a prompt
+    /// or an answer uses stays. The original files stay too.
+    pub fn remove_sources(&self, ids: &[SourceId]) -> Result<Removed> {
+        let _lock = write_lock(&self.dir)?;
+        let blocked = sources::find_used(&self.dir, ids)?;
+        let allowed: Vec<SourceId> = ids
+            .iter()
+            .filter(|id| !blocked.contains(id))
+            .cloned()
+            .collect();
+        let removed = sources::remove(&self.dir, &allowed)?;
+        if removed > 0 {
+            Index::rebuild(&self.dir)?;
+        }
+        Ok(Removed {
+            removed,
+            blocked: blocked.len(),
+        })
     }
 
     pub fn suggestions(&self, filter: &SuggestionFilter) -> Result<Vec<SuggestionRow>> {

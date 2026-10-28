@@ -8,11 +8,11 @@ mod suggestions_tab;
 
 use anime2ctxdb::{
     Action, EpisodeProgress, Failure, Position, Prompt, PromptId, PromptKind, Scan, Series, Source,
-    Status, SuggestionFilter, SuggestionId, SuggestionRow,
+    SourceId, Status, SuggestionFilter, SuggestionId, SuggestionRow,
 };
 use anyhow::Result;
 use eframe::egui;
-use sources_tab::DetectedRow;
+use sources_tab::{DetectedRow, SavedView};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -87,6 +87,7 @@ pub struct App {
     saved: Vec<Source>,
     /// The saved sources as they are on disk. A row that differs from it has unsaved changes.
     saved_base: Vec<Source>,
+    saved_view: SavedView,
     filter: SuggestionFilter,
     rows: Vec<SuggestionRow>,
     progress: Vec<EpisodeProgress>,
@@ -126,6 +127,7 @@ impl App {
             failures: Vec::new(),
             saved: Vec::new(),
             saved_base: Vec::new(),
+            saved_view: SavedView::default(),
             filter: SuggestionFilter {
                 status: Some(Status::Pending),
                 kind: None,
@@ -373,6 +375,7 @@ impl App {
         match load_views(series, self.filter) {
             Ok((saved, rows, progress)) => {
                 self.saved_base.clone_from(&saved);
+                self.saved_view.keep_saved(&saved);
                 self.saved = saved;
                 self.rows = rows;
                 self.progress = progress;
@@ -408,6 +411,7 @@ impl App {
         self.series = Some(series);
         self.detected.clear();
         self.failures.clear();
+        self.saved_view = SavedView::default();
         self.prompt = None;
         self.answer.clear();
         self.episode = None;
@@ -521,6 +525,20 @@ impl App {
             Ok(JobOutput::Status(format!(
                 "Saved {}.",
                 count_of(records.len(), "source")
+            )))
+        });
+    }
+
+    fn remove_sources(&mut self, ctx: &egui::Context, ids: Vec<SourceId>) {
+        let Some(series) = self.series.clone() else {
+            return;
+        };
+        self.start(ctx, move || {
+            let done = series.remove_sources(&ids)?;
+            Ok(JobOutput::Status(format!(
+                "Removed {}, kept {} that a prompt or an answer uses.",
+                count_of(done.removed, "source"),
+                done.blocked
             )))
         });
     }

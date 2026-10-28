@@ -1,8 +1,9 @@
 use super::{App, ClearTarget, JobOutput, confirm::Confirm, count_of};
 use anime2ctxdb::{
-    Detected, EpisodeOrigin, Language, Problem, Series, Severity, Source, SourceKind,
+    Detected, EpisodeOrigin, Language, Problem, Series, Severity, Source, SourceId, SourceKind,
 };
 use eframe::egui;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
@@ -13,7 +14,10 @@ const KIND_WIDTH: f32 = 100.0;
 const EPISODE_WIDTH: f32 = 90.0;
 const ORIGIN_WIDTH: f32 = 220.0;
 const LANGUAGE_WIDTH: f32 = 110.0;
-const SAVE_WIDTH: f32 = 90.0;
+const REMOVE_WIDTH: f32 = 110.0;
+
+/// Why a Remove button is off.
+const REMOVE_OFF: &str = "A job runs, or you have unsaved changes. Wait, save, or discard first.";
 
 /// The narrowest the file column gets, in points.
 const FILE_COLUMN_MIN_WIDTH: f32 = 200.0;
@@ -41,6 +45,35 @@ impl DetectedRow {
             origin: item.origin,
             include: true,
         }
+    }
+}
+
+/// The state of the saved list that is not part of the records.
+#[derive(Debug)]
+pub(super) struct SavedView {
+    /// The sources that the user ticked.
+    checked: BTreeSet<SourceId>,
+    /// The language that Set language gives to the ticked subtitles.
+    language: Language,
+    /// How many episodes Shift episodes moves the ticked sources.
+    shift: i32,
+}
+
+impl Default for SavedView {
+    fn default() -> SavedView {
+        SavedView {
+            checked: BTreeSet::new(),
+            language: Language::Ja,
+            shift: 1,
+        }
+    }
+}
+
+impl SavedView {
+    /// Drops the ticks of the sources that are not in `saved` any more.
+    pub(super) fn keep_saved(&mut self, saved: &[Source]) {
+        self.checked
+            .retain(|id| saved.iter().any(|record| &record.id == id));
     }
 }
 
@@ -74,9 +107,24 @@ impl App {
         });
 
         let reviewing = !self.detected.is_empty() || !self.failures.is_empty();
-        let mut save_one = None;
+        let changed = self.changed_rows();
+        let can_remove = !busy && changed.is_empty();
+        let pending: Vec<Source> = changed.iter().map(|&i| self.saved[i].clone()).collect();
+        let problems = Series::check_sources(&self.saved_base, &pending);
+        let mut by_row: Vec<Vec<Problem>> = vec![Vec::new(); self.saved.len()];
+        let mut whole: Vec<Problem> = Vec::new();
+        for problem in problems {
+            match problem.row {
+                Some(row) => by_row[changed[row]].push(problem),
+                None => whole.push(problem),
+            }
+        }
+        let mut remove: Option<Vec<SourceId>> = None;
         if reviewing {
             self.review_bar(ui, &ctx);
+        }
+        if !changed.is_empty() {
+            self.changes_bar(ui, &ctx, &pending, &whole, &by_row);
         }
         ui.separator();
         egui::ScrollArea::vertical()
@@ -94,13 +142,155 @@ impl App {
                         if self.saved.is_empty() {
                             ui.weak("No sources yet. Import subtitle files to start.");
                         } else {
-                            save_one = saved_grid(ui, &mut self.saved, &self.saved_base, !busy);
+                            for problem in &whole {
+                                ui.colored_label(problem_color(ui, problem), &problem.message);
+                            }
+                            if !self.saved_view.checked.is_empty() {
+                                remove = self.bulk_bar(ui, can_remove);
+                            }
+                            let grid = saved_grid(
+                                ui,
+                                &mut self.saved,
+                                &self.saved_base,
+                                &mut self.saved_view.checked,
+                                &by_row,
+                                can_remove,
+                            );
+                            if grid.is_some() {
+                                remove = grid;
+                            }
                         }
                     });
             });
-        if let Some(index) = save_one {
-            let record = vec![self.saved[index].clone()];
-            self.save(&ctx, record, None);
+        if let Some(ids) = remove {
+            self.ask_remove(ids);
+        }
+    }
+
+    /// The saved rows whose episode or language the user changed.
+    fn changed_rows(&self) -> Vec<usize> {
+        (0..self.saved.len())
+            .filter(|&index| {
+                let (now, base) = (&self.saved[index], &self.saved_base[index]);
+                now.episode != base.episode || now.language != base.language
+            })
+            .collect()
+    }
+
+    /// The Save and Discard buttons for the changes in the saved list.
+    fn changes_bar(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        pending: &[Source],
+        whole: &[Problem],
+        by_row: &[Vec<Problem>],
+    ) {
+        let busy = self.busy();
+        let has_error = whole
+            .iter()
+            .chain(by_row.iter().flatten())
+            .any(|problem| problem.severity == Severity::Error);
+        ui.separator();
+        ui.horizontal(|ui| {
+            let why_not = if busy {
+                Some("Wait for the current job to finish.")
+            } else if has_error {
+                Some("Fix the errors in the list first.")
+            } else {
+                None
+            };
+            let save = format!("Save {}", count_of(pending.len(), "change"));
+            let button = ui.add_enabled(why_not.is_none(), egui::Button::new(save));
+            if let Some(reason) = why_not {
+                button.on_disabled_hover_text(reason);
+            } else if button.clicked() {
+                self.save(ctx, pending.to_vec(), None);
+            }
+            if ui
+                .add_enabled(!busy, egui::Button::new("Discard changes"))
+                .clicked()
+            {
+                self.saved.clone_from(&self.saved_base);
+            }
+        });
+    }
+
+    /// The actions for the ticked sources. Returns the sources that the user wants to remove.
+    fn bulk_bar(&mut self, ui: &mut egui::Ui, can_remove: bool) -> Option<Vec<SourceId>> {
+        let mut remove = None;
+        let view = &mut self.saved_view;
+        let below_one = self
+            .saved
+            .iter()
+            .filter(|record| view.checked.contains(&record.id))
+            .filter_map(|record| record.episode)
+            .any(|episode| i64::from(episode) + i64::from(view.shift) < 1);
+        ui.horizontal(|ui| {
+            ui.label(format!("{} ticked.", view.checked.len()));
+            egui::ComboBox::from_id_salt("bulk-language")
+                .selected_text(language_text(view.language))
+                .show_ui(ui, |ui| {
+                    for option in [Language::Ja, Language::Zh, Language::En, Language::Other] {
+                        ui.selectable_value(&mut view.language, option, language_text(option));
+                    }
+                });
+            if ui.button("Set language").clicked() {
+                for record in self
+                    .saved
+                    .iter_mut()
+                    .filter(|record| view.checked.contains(&record.id))
+                    .filter(|record| record.kind == SourceKind::Subtitle)
+                {
+                    record.language = Some(view.language);
+                }
+            }
+            ui.add(
+                egui::DragValue::new(&mut view.shift)
+                    .range(-99..=99)
+                    .speed(0.1),
+            );
+            let shift = ui.add_enabled(!below_one, egui::Button::new("Shift episodes"));
+            if below_one {
+                shift.on_disabled_hover_text("An episode cannot go below 1.");
+            } else if shift.clicked() {
+                for record in self
+                    .saved
+                    .iter_mut()
+                    .filter(|record| view.checked.contains(&record.id))
+                {
+                    record.episode = record
+                        .episode
+                        .map(|episode| episode.saturating_add_signed(view.shift));
+                }
+            }
+            let button = ui.add_enabled(can_remove, egui::Button::new("Remove ticked"));
+            if can_remove {
+                if button.clicked() {
+                    remove = Some(view.checked.iter().cloned().collect());
+                }
+            } else {
+                button.on_disabled_hover_text(REMOVE_OFF);
+            }
+            if ui.button("Clear ticks").clicked() {
+                view.checked.clear();
+            }
+        });
+        remove
+    }
+
+    /// Asks the user before it removes sources. A source that a prompt or an answer uses stays.
+    fn ask_remove(&mut self, ids: Vec<SourceId>) {
+        let Some(series) = &self.series else {
+            return;
+        };
+        match series.blocked_removals(&ids) {
+            Ok(blocked) if blocked.len() == ids.len() => {
+                self.status =
+                    "Nothing to remove: a prompt or an answer uses every one of them.".to_string();
+            }
+            Ok(blocked) => self.confirm = Some(Confirm::Remove { ids, blocked }),
+            Err(error) => self.error = Some(format!("{error:#}")),
         }
     }
 
@@ -292,61 +482,136 @@ fn detected_grid(ui: &mut egui::Ui, rows: &mut [DetectedRow], problems: &[Vec<&P
     });
 }
 
-/// Shows the saved records in a grid. Returns the index of the row whose Update button was
-/// clicked. `base` holds the records as they are on disk. The button works only for a row
-/// that differs from it.
+/// The indexes of the saved records, grouped by the episode on disk. The group without an
+/// episode comes first. A video comes after the subtitles of its group.
+fn saved_groups(records: &[Source], base: &[Source]) -> Vec<(Option<u32>, Vec<usize>)> {
+    let mut order: Vec<usize> = (0..records.len()).collect();
+    order.sort_by_key(|&index| {
+        (
+            base[index].episode,
+            records[index].kind == SourceKind::Video,
+            records[index].path.clone(),
+        )
+    });
+    let mut groups: Vec<(Option<u32>, Vec<usize>)> = Vec::new();
+    for index in order {
+        match groups.last_mut() {
+            Some((group, members)) if *group == base[index].episode => members.push(index),
+            _ => groups.push((base[index].episode, vec![index])),
+        }
+    }
+    groups
+}
+
+/// Shows the saved records in a grid, grouped by episode. The files without an episode come
+/// first. `base` holds the records as they are on disk. A row stays in the group of its saved
+/// episode while the user edits it. `checked` holds the ticked sources. `problems` has the
+/// problems of each row. Returns the sources that the user wants to remove.
 fn saved_grid(
     ui: &mut egui::Ui,
     records: &mut [Source],
     base: &[Source],
-    enabled: bool,
-) -> Option<usize> {
-    let mut clicked = None;
+    checked: &mut BTreeSet<SourceId>,
+    problems: &[Vec<Problem>],
+    can_remove: bool,
+) -> Option<Vec<SourceId>> {
+    let mut remove = None;
+    let groups = saved_groups(records, base);
     let file_width = file_column_width(
         ui,
         &[
+            CHECK_WIDTH,
             ID_WIDTH,
             KIND_WIDTH,
             EPISODE_WIDTH,
             LANGUAGE_WIDTH,
-            SAVE_WIDTH,
+            REMOVE_WIDTH,
         ],
     );
     egui::Grid::new("saved").striped(true).show(ui, |ui| {
-        for heading in ["Id", "Kind", "File", "Episode", "Language", ""] {
+        for heading in ["", "Id", "Kind", "File", "Episode", "Language", ""] {
             ui.weak(heading);
         }
         ui.end_row();
-        for (index, record) in records.iter_mut().enumerate() {
-            fixed_cell(ui, ID_WIDTH, |ui| ui.monospace(&record.id.0[..8]));
-            fixed_cell(ui, KIND_WIDTH, |ui| ui.label(kind_text(record.kind)));
-            file_cell(ui, file_width, &record.path, &[]);
-            fixed_cell(ui, EPISODE_WIDTH, |ui| {
-                episode_input(ui, &mut record.episode);
-            });
-            fixed_cell(ui, LANGUAGE_WIDTH, |ui| match record.kind {
-                SourceKind::Subtitle => {
-                    language_combo(ui, &format!("saved-language-{index}"), &mut record.language);
+        for (group, members) in &groups {
+            // The box in the group row ticks or clears every source of the group.
+            let mut all = members
+                .iter()
+                .all(|&index| checked.contains(&records[index].id));
+            if fixed_cell(ui, CHECK_WIDTH, |ui| ui.checkbox(&mut all, "")).changed() {
+                for &index in members {
+                    set_checked(checked, &records[index].id, all);
                 }
-                SourceKind::Video => {
-                    ui.label("-");
-                }
-            });
-            let changed = base.get(index).is_some_and(|saved| {
-                saved.episode != record.episode || saved.language != record.language
-            });
-            let save = fixed_cell(ui, SAVE_WIDTH, |ui| {
-                ui.add_enabled(enabled && changed, egui::Button::new("Update"))
-                    .on_disabled_hover_text("Change the episode or the language first.")
+            }
+            ui.label("");
+            ui.label("");
+            let title = match group {
+                Some(number) => format!("Episode {number}"),
+                None => "No episode".to_string(),
+            };
+            ui.strong(title);
+            ui.label("");
+            ui.label("");
+            let remove_all = fixed_cell(ui, REMOVE_WIDTH, |ui| {
+                ui.add_enabled(can_remove, egui::Button::new("Remove all"))
+                    .on_disabled_hover_text(REMOVE_OFF)
                     .clicked()
             });
-            if save {
-                clicked = Some(index);
+            if remove_all {
+                remove = Some(
+                    members
+                        .iter()
+                        .map(|&index| records[index].id.clone())
+                        .collect(),
+                );
             }
             ui.end_row();
+            for &index in members {
+                let record = &mut records[index];
+                let mut on = checked.contains(&record.id);
+                if fixed_cell(ui, CHECK_WIDTH, |ui| ui.checkbox(&mut on, "")).changed() {
+                    set_checked(checked, &record.id, on);
+                }
+                fixed_cell(ui, ID_WIDTH, |ui| ui.monospace(&record.id.0[..8]));
+                fixed_cell(ui, KIND_WIDTH, |ui| ui.label(kind_text(record.kind)));
+                let row_problems: Vec<&Problem> = problems[index].iter().collect();
+                file_cell(ui, file_width, &record.path, &row_problems);
+                fixed_cell(ui, EPISODE_WIDTH, |ui| {
+                    episode_input(ui, &mut record.episode);
+                });
+                fixed_cell(ui, LANGUAGE_WIDTH, |ui| match record.kind {
+                    SourceKind::Subtitle => {
+                        language_combo(
+                            ui,
+                            &format!("saved-language-{index}"),
+                            &mut record.language,
+                        );
+                    }
+                    SourceKind::Video => {
+                        ui.label("-");
+                    }
+                });
+                let remove_one = fixed_cell(ui, REMOVE_WIDTH, |ui| {
+                    ui.add_enabled(can_remove, egui::Button::new("Remove"))
+                        .on_disabled_hover_text(REMOVE_OFF)
+                        .clicked()
+                });
+                if remove_one {
+                    remove = Some(vec![record.id.clone()]);
+                }
+                ui.end_row();
+            }
         }
     });
-    clicked
+    remove
+}
+
+fn set_checked(checked: &mut BTreeSet<SourceId>, id: &SourceId, on: bool) {
+    if on {
+        checked.insert(id.clone());
+    } else {
+        checked.remove(id);
+    }
 }
 
 /// The width of the file column. The fixed columns and the gaps between the columns take
