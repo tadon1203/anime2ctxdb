@@ -1,20 +1,25 @@
+mod new_series;
 mod package_tab;
 mod prompts_tab;
 mod sources_tab;
 mod suggestions_tab;
 
 use anime2ctxdb::{
-    Action, EpisodeProgress, Position, Prompt, PromptId, PromptKind, Series, Source, Status,
-    SuggestionFilter, SuggestionId, SuggestionRow,
+    Action, EpisodeProgress, Failure, Position, Prompt, PromptId, PromptKind, Scan, Series, Source,
+    Status, SuggestionFilter, SuggestionId, SuggestionRow,
 };
 use anyhow::Result;
 use eframe::egui;
+use sources_tab::DetectedRow;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
 /// The result of a job that runs on a worker thread.
 enum JobOutput {
-    Detected(Vec<Source>),
+    Scanned(Scan),
     Prompt(Prompt),
     Package(String),
     Status(String),
@@ -35,14 +40,27 @@ enum ClearTarget {
     Answer,
 }
 
+/// How far a scan is. A worker thread writes it. The UI reads it.
+#[derive(Debug, Default)]
+struct ScanProgress {
+    done: AtomicUsize,
+    total: AtomicUsize,
+}
+
 pub struct App {
+    /// The directory that holds all new series. It is next to the executable.
+    series_root: PathBuf,
+    /// The name that the user types in the New series dialog. `None`: the dialog is closed.
+    new_series: Option<String>,
     series: Option<Series>,
     tab: Tab,
     error: Option<String>,
     status: String,
     job: Option<Receiver<Result<JobOutput>>>,
+    scan_progress: Arc<ScanProgress>,
     clear_on_success: Option<ClearTarget>,
-    detected: Vec<Source>,
+    detected: Vec<DetectedRow>,
+    failures: Vec<Failure>,
     saved: Vec<Source>,
     filter: SuggestionFilter,
     rows: Vec<SuggestionRow>,
@@ -55,16 +73,20 @@ pub struct App {
     package: Option<String>,
 }
 
-impl Default for App {
-    fn default() -> Self {
+impl App {
+    pub fn new(series_root: PathBuf) -> Self {
         App {
+            series_root,
+            new_series: None,
             series: None,
             tab: Tab::Sources,
             error: None,
             status: String::new(),
             job: None,
+            scan_progress: Arc::default(),
             clear_on_success: None,
             detected: Vec::new(),
+            failures: Vec::new(),
             saved: Vec::new(),
             filter: SuggestionFilter {
                 status: Some(Status::Pending),
@@ -85,7 +107,21 @@ impl Default for App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll();
+        let ctx = ui.ctx().clone();
+        let dropped: Vec<PathBuf> = ctx.input(|input| {
+            input
+                .raw
+                .dropped_files
+                .iter()
+                .map(|file| file.path().to_path_buf())
+                .filter(|path| !path.as_os_str().is_empty())
+                .collect()
+        });
+        if !dropped.is_empty() {
+            self.import_dropped(&ctx, dropped);
+        }
         egui::CentralPanel::default().show(ui, |ui| self.body(ui));
+        self.new_series_window(&ctx);
     }
 }
 
@@ -145,6 +181,8 @@ impl App {
         match receiver.try_recv() {
             Ok(result) => {
                 self.job = None;
+                self.scan_progress.done.store(0, Ordering::Relaxed);
+                self.scan_progress.total.store(0, Ordering::Relaxed);
                 self.finish(result);
             }
             Err(TryRecvError::Empty) => {}
@@ -155,9 +193,23 @@ impl App {
     fn finish(&mut self, result: Result<JobOutput>) {
         let clear = self.clear_on_success.take();
         match result {
-            Ok(JobOutput::Detected(records)) => {
-                self.status = format!("Detected {} files.", records.len());
-                self.detected = records;
+            Ok(JobOutput::Scanned(scan)) => {
+                self.status = format!(
+                    "Detected {} files, skipped {}, failed {}.",
+                    scan.detected.len(),
+                    scan.skipped,
+                    scan.failed.len()
+                );
+                for item in scan.detected {
+                    if !self
+                        .detected
+                        .iter()
+                        .any(|row| row.source.id == item.source.id)
+                    {
+                        self.detected.push(DetectedRow::new(item));
+                    }
+                }
+                self.failures.extend(scan.failed);
             }
             Ok(JobOutput::Prompt(prompt)) => {
                 self.status = "Prompt made. Copy it to an AI chat.".to_string();
@@ -169,7 +221,10 @@ impl App {
             }
             Ok(JobOutput::Status(message)) => {
                 match clear {
-                    Some(ClearTarget::Detected) => self.detected.clear(),
+                    Some(ClearTarget::Detected) => {
+                        self.detected.clear();
+                        self.failures.clear();
+                    }
                     Some(ClearTarget::Answer) => self.answer.clear(),
                     None => {}
                 }
@@ -199,26 +254,14 @@ impl App {
     }
 
     fn open_series(&mut self, ctx: &egui::Context) {
-        let Some(path) = rfd::FileDialog::new()
-            .set_title("Open series")
-            .pick_folder()
-        else {
+        let mut picker = rfd::FileDialog::new().set_title("Open series");
+        if self.series_root.is_dir() {
+            picker = picker.set_directory(&self.series_root);
+        }
+        let Some(path) = picker.pick_folder() else {
             return;
         };
         match Series::open(&path) {
-            Ok(series) => self.use_series(ctx, series),
-            Err(error) => self.error = Some(format!("{error:#}")),
-        }
-    }
-
-    fn new_series(&mut self, ctx: &egui::Context) {
-        let Some(path) = rfd::FileDialog::new()
-            .set_title("Choose an empty folder for the new series")
-            .pick_folder()
-        else {
-            return;
-        };
-        match Series::create(&path) {
             Ok(series) => self.use_series(ctx, series),
             Err(error) => self.error = Some(format!("{error:#}")),
         }
@@ -231,6 +274,7 @@ impl App {
         )));
         self.series = Some(series);
         self.detected.clear();
+        self.failures.clear();
         self.prompt = None;
         self.answer.clear();
         self.episode = None;
@@ -320,7 +364,13 @@ impl App {
             ui.selectable_value(&mut self.tab, Tab::Package, "Package");
         });
         if self.busy() {
-            ui.label("Working...");
+            let total = self.scan_progress.total.load(Ordering::Relaxed);
+            if total > 0 {
+                let done = self.scan_progress.done.load(Ordering::Relaxed);
+                ui.label(format!("Working... {done}/{total}"));
+            } else {
+                ui.label("Working...");
+            }
         } else if !self.status.is_empty() {
             ui.label(self.status.as_str());
         }
@@ -347,7 +397,7 @@ impl App {
                 .add_enabled(!busy, egui::Button::new("New series"))
                 .clicked()
             {
-                self.new_series(&ctx);
+                self.new_series = Some(String::new());
             }
             let title = match &self.series {
                 Some(series) => format!("anime2ctxdb - {}", series.dir().display()),

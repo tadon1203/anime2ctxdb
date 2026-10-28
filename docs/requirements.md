@@ -25,7 +25,7 @@ The package holds nothing from after the chosen point. The AI that reads the pac
 
 ## What the user does
 
-- The user gives source files to the product.
+- The user gives source files and folders to the product. A folder includes its subfolders. The product proposes the episode and the language of each file, and shows where the episode came from. The user reviews the proposal and can change it or leave a file out before the save.
 - The user approves or rejects suggestions from the product.
 - The user copies prompts to an external AI tool and pastes the answers back.
 - The user never enters story data by hand. The user can correct the episode and the language of an imported file.

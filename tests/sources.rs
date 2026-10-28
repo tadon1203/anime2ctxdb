@@ -1,4 +1,4 @@
-use anime2ctxdb::{Language, Series, SourceKind};
+use anime2ctxdb::{EpisodeOrigin, Language, Series, Severity, SourceKind};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -25,7 +25,7 @@ fn copy_other_subtitle(dir: &Path, name: &str) -> PathBuf {
 
 fn write_video(dir: &Path, name: &str) -> PathBuf {
     let target = dir.join(name);
-    fs::write(&target, b"not really a video").expect("the video file is written");
+    fs::write(&target, name.as_bytes()).expect("the video file is written");
     target
 }
 
@@ -113,15 +113,146 @@ fn save_rejects_two_ja_subtitles_for_one_episode() {
 }
 
 #[test]
-fn save_rejects_a_gap_and_names_the_missing_episode() {
+fn save_allows_a_gap_and_check_warns_about_the_missing_episode() {
     let inputs = TempDir::new().expect("a temporary directory");
     let series = new_series(&inputs);
     let path = copy_subtitle(inputs.path(), "Show - 02.ass");
     let records = series.read_files(&[path]).expect("the file is read");
 
-    let error = series.add_sources(&records).expect_err("a gap is rejected");
+    let problems = Series::check_sources(&[], &records);
+    series.add_sources(&records).expect("a gap is allowed");
 
-    assert!(format!("{error:#}").contains("episode 1 is missing"));
+    assert_eq!(problems.len(), 1);
+    assert_eq!(problems[0].severity, Severity::Warning);
+    assert_eq!(problems[0].row, None);
+    assert!(problems[0].message.contains("no subtitle for episode 1"));
+}
+
+#[test]
+fn check_marks_the_rows_with_a_problem() {
+    let inputs = TempDir::new().expect("a temporary directory");
+    let series = new_series(&inputs);
+    let first = copy_subtitle(inputs.path(), "a - 01.ass");
+    let second = copy_other_subtitle(inputs.path(), "b - 01.ass");
+    let video = write_video(inputs.path(), "Show.mkv");
+    let records = series
+        .read_files(&[first, second, video])
+        .expect("the files are read");
+
+    let problems = Series::check_sources(&[], &records);
+
+    let errors: Vec<Option<usize>> = problems
+        .iter()
+        .filter(|problem| problem.severity == Severity::Error)
+        .map(|problem| problem.row)
+        .collect();
+    assert_eq!(errors, [Some(0), Some(1)]);
+    assert!(problems.iter().any(|problem| problem.row == Some(2)
+        && problem.severity == Severity::Warning
+        && problem.message.contains("no episode")));
+}
+
+#[test]
+fn check_warns_when_the_episode_already_has_a_saved_source() {
+    let inputs = TempDir::new().expect("a temporary directory");
+    let series = new_series(&inputs);
+    let saved = write_video(inputs.path(), "a - 01.mkv");
+    let records = series.read_files(&[saved]).expect("the file is read");
+    series.add_sources(&records).expect("the sources are added");
+    let other = inputs.path().join("other");
+    fs::create_dir(&other).expect("the directory is made");
+    let again = {
+        let path = other.join("b - 01.mkv");
+        fs::write(&path, b"another video").expect("the video file is written");
+        path
+    };
+    let pending = series.read_files(&[again]).expect("the file is read");
+
+    let problems = Series::check_sources(&series.sources().expect("the sources load"), &pending);
+
+    assert!(problems.iter().any(|problem| problem.row == Some(0)
+        && problem.severity == Severity::Warning
+        && problem.message.contains("already has a saved source")));
+}
+
+#[test]
+fn scan_reads_a_folder_with_its_subfolders() {
+    let inputs = TempDir::new().expect("a temporary directory");
+    let series = new_series(&inputs);
+    let show = inputs.path().join("Folder");
+    let season = show.join("Season 1");
+    fs::create_dir_all(&season).expect("the directories are made");
+    copy_subtitle(&show, "Show - 01.ass");
+    write_video(&season, "Show - 02.mkv");
+    write_video(&season, "cover.jpg");
+    fs::write(
+        show.join("Show - 01 copy.ass"),
+        fs::read(raw_subtitle()).expect("reads"),
+    )
+    .expect("the copy is written");
+    fs::write(season.join("broken - 03.ass"), "not a subtitle").expect("the file is written");
+
+    let mut steps = Vec::new();
+    let scan = series
+        .scan(&[show], |done, total| steps.push((done, total)))
+        .expect("the folder is scanned");
+
+    assert_eq!(scan.detected.len(), 2);
+    assert_eq!(scan.skipped, 2);
+    assert_eq!(scan.failed.len(), 1);
+    assert!(scan.failed[0].path.ends_with("broken - 03.ass"));
+    assert_eq!(steps.last(), Some(&(4, 4)));
+}
+
+#[test]
+fn scan_proposes_an_episode_from_the_folder_name_and_a_sibling() {
+    let inputs = TempDir::new().expect("a temporary directory");
+    let series = new_series(&inputs);
+    let folder = inputs.path().join("Show 第3話");
+    fs::create_dir(&folder).expect("the directory is made");
+    write_video(&folder, "subs.mkv");
+    let by_folder = inputs.path().join("Season 2");
+    fs::create_dir(&by_folder).expect("the directory is made");
+    write_video(&by_folder, "movie.mkv");
+    let pair = inputs.path().join("pair");
+    fs::create_dir(&pair).expect("the directory is made");
+    write_video(&pair, "clip [5].mkv");
+    copy_subtitle(&pair, "clip [5].ja.ass");
+    copy_other_subtitle(&pair, "01.ass");
+
+    let scan = series
+        .scan(&[inputs.path().to_path_buf()], |_, _| {})
+        .expect("the folder is scanned");
+
+    let find = |name: &str| {
+        scan.detected
+            .iter()
+            .find(|item| item.source.path.ends_with(name))
+            .unwrap_or_else(|| panic!("{name} is detected"))
+    };
+    assert_eq!(find("subs.mkv").source.episode, Some(3));
+    assert_eq!(find("subs.mkv").origin, EpisodeOrigin::FolderName);
+    assert_eq!(find("movie.mkv").source.episode, None);
+    assert_eq!(find("movie.mkv").origin, EpisodeOrigin::Unknown);
+    assert_eq!(find("clip [5].ja.ass").source.episode, Some(5));
+    assert_eq!(find("01.ass").source.episode, Some(1));
+    assert_eq!(find("01.ass").origin, EpisodeOrigin::FileName);
+}
+
+#[test]
+fn new_dir_rejects_a_bad_name_and_a_directory_that_is_not_empty() {
+    let parent = TempDir::new().expect("a temporary directory");
+    fs::create_dir(parent.path().join("used")).expect("the directory is made");
+    fs::write(parent.path().join("used").join("note.txt"), b"x").expect("the note is written");
+
+    for name in ["", "  ", "a/b", "a:b", "..", "end.", "used"] {
+        assert!(
+            Series::new_dir(parent.path(), name).is_err(),
+            "name {name:?}"
+        );
+    }
+    let dir = Series::new_dir(parent.path(), " Show 2 ").expect("the name is fine");
+    assert_eq!(dir, parent.path().join("Show 2"));
 }
 
 #[test]

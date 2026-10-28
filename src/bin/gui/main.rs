@@ -37,6 +37,12 @@ fn main() -> Result<()> {
         }
     }
 
+    let exe_path = std::env::current_exe().context("cannot find the executable")?;
+    let Some(exe_dir) = exe_path.parent() else {
+        bail!("the executable {} has no directory", exe_path.display());
+    };
+    let series_root = exe_dir.join("series");
+
     eframe::run_native(
         "anime2ctxdb",
         eframe::NativeOptions {
@@ -45,7 +51,7 @@ fn main() -> Result<()> {
         },
         Box::new(|creation| {
             app::set_sizes(&creation.egui_ctx);
-            Ok(Box::new(app::App::default()))
+            Ok(Box::new(app::App::new(series_root)))
         }),
     )?;
     Ok(())

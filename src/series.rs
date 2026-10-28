@@ -7,7 +7,7 @@ use index::Index;
 use crate::files::{read_json, write_atomic};
 use crate::model::Position;
 use crate::package;
-use crate::sources::{self, Source};
+use crate::sources::{self, Problem, Scan, Source};
 use crate::suggestions::prompt::{self, AnswerError, Prompt, PromptId, PromptKind};
 use crate::suggestions::suggestion::{
     self, Action, Content, Decision, Status, Suggestion, SuggestionId, SuggestionKind,
@@ -22,6 +22,17 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct Series {
     dir: PathBuf,
+}
+
+/// Checks that a new series can use the directory: it is missing or empty.
+fn check_new_dir(dir: &Path) -> Result<()> {
+    if dir.exists() {
+        ensure!(dir.is_dir(), "{} is not a directory", dir.display());
+        let mut entries =
+            fs::read_dir(dir).with_context(|| format!("cannot read {}", dir.display()))?;
+        ensure!(entries.next().is_none(), "{} is not empty", dir.display());
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,16 +61,25 @@ pub struct Decided {
 }
 
 impl Series {
+    /// The directory for a new series called `name` inside `parent`. The directory must be
+    /// missing or empty. This checks the name and the directory. It makes nothing.
+    pub fn new_dir(parent: &Path, name: &str) -> Result<PathBuf> {
+        let name = name.trim();
+        ensure!(!name.is_empty(), "the name is empty");
+        ensure!(
+            !name.contains(|c: char| c.is_control() || r#"\/:*?"<>|"#.contains(c)),
+            r#"the name must not have any of \ / : * ? " < > |"#
+        );
+        ensure!(!name.ends_with('.'), "the name must not end with a dot");
+        let dir = parent.join(name);
+        check_new_dir(&dir)?;
+        Ok(dir)
+    }
+
     /// Makes a new series. The directory must be missing or empty.
     pub fn create(dir: &Path) -> Result<Series> {
-        if dir.exists() {
-            ensure!(dir.is_dir(), "{} is not a directory", dir.display());
-            let mut entries =
-                fs::read_dir(dir).with_context(|| format!("cannot read {}", dir.display()))?;
-            ensure!(entries.next().is_none(), "{} is not empty", dir.display());
-        } else {
-            fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
-        }
+        check_new_dir(dir)?;
+        fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
         for name in ["sources", "prompts", "answers"] {
             let path = dir.join(name);
             fs::create_dir_all(&path)
@@ -86,7 +106,7 @@ impl Series {
         ] {
             ensure!(
                 dir.join(name).exists(),
-                "{} is not a series: {name} is missing",
+                "{} is not a series folder: {name} is missing. Use New series to make a series.",
                 dir.display()
             );
         }
@@ -115,6 +135,18 @@ impl Series {
                 Ok(record)
             })
             .collect()
+    }
+
+    /// Reads files and folders and proposes a record for each supported file. Nothing is saved.
+    /// `progress` gets the number of files done and the total.
+    pub fn scan(&self, paths: &[PathBuf], progress: impl FnMut(usize, usize)) -> Result<Scan> {
+        sources::scan(&self.dir, paths, progress)
+    }
+
+    /// Finds the problems of saving `pending` records next to the `saved` records.
+    /// An error blocks the save. A warning does not.
+    pub fn check_sources(saved: &[Source], pending: &[Source]) -> Vec<Problem> {
+        sources::check(saved, pending)
     }
 
     pub fn add_sources(&self, records: &[Source]) -> Result<()> {
