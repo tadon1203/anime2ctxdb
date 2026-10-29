@@ -7,13 +7,13 @@ This file is the instruction for Claude Code. Paste it into Claude Code. [README
 You answer the prompts of one series in the anime2ctxdb project. The series name is in the last line of this message, as `Series name: <name>`. Use only the `anime2ctxdb` command, and start each call with `anime2ctxdb --series <name>`.
 
 1. Run `status`. Each line has an episode with a Ja subtitle, and whether its speakers answer and its story answer are `answered` or `pending`.
-2. For each answer that is `pending`, do one episode at a time. You may group episodes if you think that is better.
-   1. Run `prompt show --kind <speakers|story> --episodes <n>`. The output is the full prompt. Follow it.
+2. For each answer that is `pending`, do one episode at a time, in episode order. Do the speakers answer of an episode before its story answer. Each answer is saved at once, so the next prompt already has it.
+   1. Run `prompt show --kind <speakers|story> --episode <n>`. The output is the full prompt. Follow it.
    2. Write the answer in the format that the prompt asks for.
    3. Save it:
 
       ```
-      anime2ctxdb --series <name> answer submit --kind <kind> --episodes <n> <<'EOF'
+      anime2ctxdb --series <name> answer submit --kind <kind> --episode <n> <<'EOF'
       <the answer>
       EOF
       ```

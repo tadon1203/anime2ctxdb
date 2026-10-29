@@ -5,7 +5,7 @@ use std::fmt;
 /// The `kind` of an entity that can speak.
 pub const CHARACTER: &str = "character";
 
-/// The suggestion ID that made the entity.
+/// The name of the entity. An entity is its name.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EntityId(pub String);
 

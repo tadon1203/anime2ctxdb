@@ -1,11 +1,11 @@
+use crate::answers::answer::{self, Answer};
+use crate::answers::prompt::{PromptFact, PromptKind, PromptLine, SpeakersInput, StoryInput};
 use crate::files::{enum_from_text, enum_text};
 use crate::model::{CHARACTER, Entity, EntityId, Position, format_clock};
 use crate::package::{PackageFact, PackageInput, PackageLine, PackageScene};
 use crate::sources::ass::{self, LineId};
 use crate::sources::{self, Language, Source, SourceId, SourceKind};
 use crate::speakers::{self, Label, Speaker, SpeakerMethod};
-use crate::suggestions::prompt::{self, PromptFact, PromptLine, SpeakersInput, StoryInput};
-use crate::suggestions::suggestion::{self, Content, Review, Status, Suggestion, SuggestionId};
 use anyhow::{Context, Result, anyhow, bail};
 use rusqlite::{Connection, OpenFlags, Row, Transaction, params};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The version of the tables in `schema.sql`. A different version means a full rebuild.
-pub const SCHEMA_VERSION: i32 = 4;
+pub const SCHEMA_VERSION: i32 = 5;
 
 const SCHEMA: &str = include_str!("schema.sql");
 
@@ -24,8 +24,45 @@ pub struct EpisodeProgress {
     pub has_subtitle: bool,
     /// `None` when there is no `Ja` subtitle.
     pub unknown_lines: Option<u32>,
-    /// The approved facts that start in this episode.
+    /// The facts that start in this episode.
     pub facts: u32,
+}
+
+/// An entity, as the Data view shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityRow {
+    pub name: String,
+    pub kind: String,
+    pub reading: Option<String>,
+    pub since: Position,
+}
+
+/// A fact, as the Data view shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FactRow {
+    pub since: Position,
+    pub entities: Vec<String>,
+    pub text: String,
+    /// For example `E1 00:10 わたし 持つ！`.
+    pub evidence: Vec<String>,
+}
+
+/// A scene, as the Data view shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SceneRow {
+    pub episode: u32,
+    pub start_ms: u32,
+    pub end_ms: u32,
+    pub place: Option<String>,
+    pub summary: String,
+}
+
+/// What the answers gave, for the Data view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataView {
+    pub entities: Vec<EntityRow>,
+    pub facts: Vec<FactRow>,
+    pub scenes: Vec<SceneRow>,
 }
 
 /// Where a line is in its episode. A line is in the story at `end_ms`.
@@ -48,15 +85,22 @@ struct EpisodeLine {
 struct Data {
     records: Vec<Source>,
     lines: Vec<EpisodeLine>,
-    suggestions: Vec<Suggestion>,
-    reviews: HashMap<SuggestionId, Review>,
+    /// In order: by episode, and then speakers before story.
+    answers: Vec<Answer>,
 }
 
-/// The labels, colors, and line speakers that the approved suggestions set.
-struct ApprovedContent {
+/// The labels, colors, and line speakers that the answers set. A later episode wins.
+struct SpeakerData {
     labels: HashMap<String, Label>,
     colors: HashMap<u32, EntityId>,
     line_speakers: HashMap<LineId, Vec<EntityId>>,
+}
+
+/// An entity from the answers. Answers with one name give one entity.
+struct MergedEntity {
+    kind: String,
+    reading: Option<String>,
+    since: Position,
 }
 
 /// The SQLite index of one series. It holds no truth. The files hold it.
@@ -80,7 +124,7 @@ fn is_current(path: &Path) -> Result<bool> {
 
 /// Builds the index again from the files. The new file replaces the old one only when it is complete.
 fn rebuild(series_dir: &Path) -> Result<()> {
-    let data = load(series_dir)?;
+    let data = load(series_dir, None)?;
     let temporary = series_dir.join("index.sqlite.tmp");
     if temporary.exists() {
         fs::remove_file(&temporary)
@@ -89,11 +133,7 @@ fn rebuild(series_dir: &Path) -> Result<()> {
     {
         let mut connection = Connection::open(&temporary)
             .with_context(|| format!("cannot create {}", temporary.display()))?;
-        connection.execute_batch(SCHEMA)?;
-        connection.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-        let transaction = connection.transaction()?;
-        write_all(&transaction, &data)?;
-        transaction.commit()?;
+        fill(&mut connection, &data)?;
     }
     let index = index_path(series_dir);
     fs::rename(&temporary, &index)
@@ -101,15 +141,23 @@ fn rebuild(series_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn load(series_dir: &Path) -> Result<Data> {
-    let records = sources::load(series_dir)?;
-    let decisions = suggestion::read_decisions(series_dir)?;
+/// Makes the tables and fills them.
+fn fill(connection: &mut Connection, data: &Data) -> Result<()> {
+    connection.execute_batch(SCHEMA)?;
+    connection.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    let transaction = connection.transaction()?;
+    write_all(&transaction, data)?;
+    transaction.commit()?;
+    Ok(())
+}
 
-    let mut suggestions = Vec::new();
-    for (_, answer) in prompt::read_answers(series_dir)? {
-        suggestions.extend(answer.suggestions);
-    }
-    let reviews = suggestion::reviews(&suggestions, &decisions);
+/// Reads the files of the series. `skip` leaves out the answer of one kind to one episode.
+fn load(series_dir: &Path, skip: Option<(PromptKind, u32)>) -> Result<Data> {
+    let records = sources::load(series_dir)?;
+    let answers = answer::read_answers(series_dir)?
+        .into_iter()
+        .filter(|answer| Some((answer.kind(), answer.episode())) != skip)
+        .collect();
 
     let mut lines = Vec::new();
     for record in &records {
@@ -137,8 +185,7 @@ fn load(series_dir: &Path) -> Result<Data> {
     Ok(Data {
         records,
         lines,
-        suggestions,
-        reviews,
+        answers,
     })
 }
 
@@ -146,11 +193,6 @@ fn write_all(transaction: &Transaction<'_>, data: &Data) -> Result<()> {
     insert_sources(transaction, &data.records)?;
     insert_lines(transaction, &data.lines)?;
 
-    let approved: Vec<&Suggestion> = data
-        .suggestions
-        .iter()
-        .filter(|suggestion| is_data(data.reviews[&suggestion.id]))
-        .collect();
     let line_index: HashMap<&LineId, LineTime> = data
         .lines
         .iter()
@@ -166,12 +208,10 @@ fn write_all(transaction: &Transaction<'_>, data: &Data) -> Result<()> {
         })
         .collect();
 
-    insert_entities(transaction, &approved, &line_index)?;
-    insert_facts(transaction, &approved, &line_index)?;
-    insert_scenes(transaction, &approved, &line_index)?;
-    let content = insert_approved_content(transaction, &approved, &line_index)?;
-    insert_episode_speakers(transaction, &data.lines, &content)?;
-    insert_suggestions(transaction, data)
+    insert_entities(transaction, &data.answers, &line_index)?;
+    insert_story(transaction, &data.answers, &line_index)?;
+    let speaker_data = insert_speaker_data(transaction, &data.answers, &line_index)?;
+    insert_episode_speakers(transaction, &data.lines, &speaker_data)
 }
 
 fn insert_sources(transaction: &Transaction<'_>, records: &[Source]) -> Result<()> {
@@ -213,94 +253,99 @@ fn insert_lines(transaction: &Transaction<'_>, lines: &[EpisodeLine]) -> Result<
     Ok(())
 }
 
+/// Writes the entities that the answers introduce. An entity is its name. When answers give one
+/// name more than once, the later answer sets the kind and the reading, and the entity is known
+/// from the earliest evidence.
 fn insert_entities(
     transaction: &Transaction<'_>,
-    approved: &[&Suggestion],
+    answers: &[Answer],
     line_index: &HashMap<&LineId, LineTime>,
 ) -> Result<()> {
-    for suggestion in approved {
-        if let Content::Entity {
-            kind,
-            name,
-            reading,
-            ..
-        } = &suggestion.content
-        {
-            let since = since_of(suggestion, line_index)?;
-            transaction.execute(
-                "INSERT INTO entities VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    suggestion.id.0,
-                    kind,
-                    name,
-                    reading,
-                    since.episode,
-                    since.time_ms
-                ],
-            )?;
+    let mut merged: BTreeMap<&str, MergedEntity> = BTreeMap::new();
+    for answer in answers {
+        let introduced = match answer {
+            Answer::Speakers { characters, .. } => characters,
+            Answer::Story { entities, .. } => entities,
+        };
+        for entity in introduced {
+            let since = since_of(entity.evidence.lines(), line_index, answer)?;
+            match merged.get_mut(entity.name.as_str()) {
+                Some(old) => {
+                    old.kind.clone_from(&entity.kind);
+                    old.reading = entity.reading.clone().or(old.reading.take());
+                    old.since = old.since.min(since);
+                }
+                None => {
+                    merged.insert(
+                        &entity.name,
+                        MergedEntity {
+                            kind: entity.kind.clone(),
+                            reading: entity.reading.clone(),
+                            since,
+                        },
+                    );
+                }
+            }
         }
+    }
+    for (name, entity) in merged {
+        transaction.execute(
+            "INSERT INTO entities VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                name,
+                entity.kind,
+                entity.reading,
+                entity.since.episode,
+                entity.since.time_ms
+            ],
+        )?;
     }
     Ok(())
 }
 
-fn insert_facts(
+/// Writes the facts and the scenes of the story answers.
+fn insert_story(
     transaction: &Transaction<'_>,
-    approved: &[&Suggestion],
+    answers: &[Answer],
     line_index: &HashMap<&LineId, LineTime>,
 ) -> Result<()> {
-    for suggestion in approved {
-        if let Content::Fact {
-            entities,
-            text,
-            evidence,
-        } = &suggestion.content
-        {
-            let since = since_of(suggestion, line_index)?;
+    for answer in answers {
+        let Answer::Story { facts, scenes, .. } = answer else {
+            continue;
+        };
+        let name = answer_name(answer);
+        for (number, fact) in facts.iter().enumerate() {
+            let id = format!("{name}-fact-{}", number + 1);
+            let since = since_of(fact.evidence.lines(), line_index, answer)?;
             transaction.execute(
                 "INSERT INTO facts VALUES (?1, ?2, ?3, ?4)",
-                params![suggestion.id.0, text, since.episode, since.time_ms],
+                params![id, fact.text, since.episode, since.time_ms],
             )?;
-            for entity in entities {
+            for entity in &fact.entities {
                 transaction.execute(
                     "INSERT INTO fact_entities VALUES (?1, ?2)",
-                    params![suggestion.id.0, entity],
+                    params![id, entity],
                 )?;
             }
-            for line in evidence.lines() {
+            for line in fact.evidence.lines() {
                 transaction.execute(
                     "INSERT INTO fact_evidence VALUES (?1, ?2)",
-                    params![suggestion.id.0, line.0],
+                    params![id, line.0],
                 )?;
             }
         }
-    }
-    Ok(())
-}
-
-fn insert_scenes(
-    transaction: &Transaction<'_>,
-    approved: &[&Suggestion],
-    line_index: &HashMap<&LineId, LineTime>,
-) -> Result<()> {
-    for suggestion in approved {
-        if let Content::Scene {
-            start,
-            end,
-            place,
-            summary,
-        } = &suggestion.content
-        {
-            let start_line = line_time(suggestion, start, line_index)?;
-            let end_line = line_time(suggestion, end, line_index)?;
+        for (number, scene) in scenes.iter().enumerate() {
+            let start = line_time(answer, &scene.start, line_index)?;
+            let end = line_time(answer, &scene.end, line_index)?;
             transaction.execute(
                 "INSERT INTO scenes VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
-                    suggestion.id.0,
-                    start_line.episode,
-                    start_line.start_ms,
-                    end_line.end_ms,
-                    place,
-                    summary
+                    format!("{name}-scene-{}", number + 1),
+                    start.episode,
+                    start.start_ms,
+                    end.end_ms,
+                    scene.place,
+                    scene.summary
                 ],
             )?;
         }
@@ -308,11 +353,20 @@ fn insert_scenes(
     Ok(())
 }
 
-/// The position where the evidence of a suggestion is known: the latest end of its lines.
-fn since_of(suggestion: &Suggestion, line_index: &HashMap<&LineId, LineTime>) -> Result<Position> {
+/// The name of an answer in messages and in IDs, for example `story-3`.
+fn answer_name(answer: &Answer) -> String {
+    format!("{}-{}", enum_text(&answer.kind()), answer.episode())
+}
+
+/// The position where the evidence is known: the latest end of its lines.
+fn since_of(
+    lines: &[LineId],
+    line_index: &HashMap<&LineId, LineTime>,
+    answer: &Answer,
+) -> Result<Position> {
     let mut since: Option<Position> = None;
-    for line in suggestion.content.evidence_lines() {
-        let found = line_time(suggestion, &line, line_index)?;
+    for line in lines {
+        let found = line_time(answer, line, line_index)?;
         let position = Position {
             episode: found.episode,
             time_ms: found.end_ms,
@@ -323,71 +377,84 @@ fn since_of(suggestion: &Suggestion, line_index: &HashMap<&LineId, LineTime>) ->
 }
 
 fn line_time(
-    suggestion: &Suggestion,
+    answer: &Answer,
     line: &LineId,
     line_index: &HashMap<&LineId, LineTime>,
 ) -> Result<LineTime> {
     line_index
         .get(line)
         .copied()
-        .ok_or_else(|| missing_line(&suggestion.id, line))
+        .ok_or_else(|| missing_line(answer, line))
 }
 
-fn insert_approved_content(
+/// Writes the labels, the colors, and the line speakers of the speakers answers. A later episode
+/// wins over an earlier one.
+fn insert_speaker_data(
     transaction: &Transaction<'_>,
-    approved: &[&Suggestion],
+    answers: &[Answer],
     line_index: &HashMap<&LineId, LineTime>,
-) -> Result<ApprovedContent> {
-    let mut content = ApprovedContent {
+) -> Result<SpeakerData> {
+    let mut data = SpeakerData {
         labels: HashMap::new(),
         colors: HashMap::new(),
         line_speakers: HashMap::new(),
     };
-    for suggestion in approved {
-        match &suggestion.content {
-            Content::Label {
-                label,
-                kind,
-                character,
-            } => {
-                transaction.execute(
-                    "INSERT INTO speaker_labels VALUES (?1, ?2, ?3)",
-                    params![label, enum_text(kind), character],
-                )?;
-                content.labels.insert(
-                    label.clone(),
-                    Label {
-                        kind: *kind,
-                        character: character.clone().map(EntityId),
-                    },
-                );
+    for answer in answers {
+        let Answer::Speakers {
+            labels,
+            colors,
+            lines,
+            ..
+        } = answer
+        else {
+            continue;
+        };
+        for entry in labels {
+            data.labels.insert(
+                entry.label.clone(),
+                Label {
+                    kind: entry.kind,
+                    character: entry.character.clone().map(EntityId),
+                },
+            );
+        }
+        for entry in colors {
+            data.colors
+                .insert(entry.color, EntityId(entry.character.clone()));
+        }
+        for entry in lines {
+            if !line_index.contains_key(&entry.line) {
+                return Err(missing_line(answer, &entry.line));
             }
-            Content::Color { color, character } => {
-                transaction.execute(
-                    "INSERT INTO speaker_colors VALUES (?1, ?2)",
-                    params![color, character],
-                )?;
-                content.colors.insert(*color, EntityId(character.clone()));
-            }
-            Content::LineSpeaker { line, characters } => {
-                if !line_index.contains_key(line) {
-                    return Err(missing_line(&suggestion.id, line));
-                }
-                content.line_speakers.insert(
-                    line.clone(),
-                    characters.iter().cloned().map(EntityId).collect(),
-                );
-            }
-            Content::Entity { .. } | Content::Fact { .. } | Content::Scene { .. } => {}
+            data.line_speakers.insert(
+                entry.line.clone(),
+                entry.characters.iter().cloned().map(EntityId).collect(),
+            );
         }
     }
-    Ok(content)
+    for (label, entry) in &data.labels {
+        transaction.execute(
+            "INSERT INTO speaker_labels VALUES (?1, ?2, ?3)",
+            params![
+                label,
+                enum_text(&entry.kind),
+                entry.character.as_ref().map(|id| &id.0)
+            ],
+        )?;
+    }
+    for (color, character) in &data.colors {
+        transaction.execute(
+            "INSERT INTO speaker_colors VALUES (?1, ?2)",
+            params![color, character.0],
+        )?;
+    }
+    Ok(data)
 }
 
 fn insert_episode_speakers(
     transaction: &Transaction<'_>,
     lines: &[EpisodeLine],
-    content: &ApprovedContent,
+    data: &SpeakerData,
 ) -> Result<()> {
     let mut episodes: BTreeMap<u32, Vec<(LineId, &ass::Line)>> = BTreeMap::new();
     for episode_line in lines {
@@ -399,9 +466,9 @@ fn insert_episode_speakers(
     for episode_lines in episodes.values() {
         let speakers = speakers::resolve(
             episode_lines,
-            &content.labels,
-            &content.colors,
-            &content.line_speakers,
+            &data.labels,
+            &data.colors,
+            &data.line_speakers,
         );
         for ((line_id, _), speaker) in episode_lines.iter().zip(speakers) {
             insert_speaker(transaction, line_id, &speaker)?;
@@ -410,32 +477,11 @@ fn insert_episode_speakers(
     Ok(())
 }
 
-fn insert_suggestions(transaction: &Transaction<'_>, data: &Data) -> Result<()> {
-    for suggestion in &data.suggestions {
-        let review = data.reviews[&suggestion.id];
-        let answer_id = suggestion.id.sort_key().0;
-        transaction.execute(
-            "INSERT INTO suggestions VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                suggestion.id.0,
-                answer_id,
-                enum_text(&suggestion.content.kind()),
-                enum_text(&review.status),
-                review.blocked,
-                serde_json::to_string(&suggestion.content)?,
-            ],
-        )?;
-    }
-    Ok(())
-}
-
-/// Approved and not blocked. Only these suggestions become data.
-fn is_data(review: Review) -> bool {
-    review.status == Status::Approved && !review.blocked
-}
-
-fn missing_line(suggestion: &SuggestionId, line: &LineId) -> anyhow::Error {
-    anyhow!("approved suggestion {suggestion} uses line {line}, which is not in lines")
+fn missing_line(answer: &Answer, line: &LineId) -> anyhow::Error {
+    anyhow!(
+        "answer {} uses line {line}, which is not in lines",
+        answer_name(answer)
+    )
 }
 
 fn insert_speaker(transaction: &Transaction<'_>, line: &LineId, speaker: &Speaker) -> Result<()> {
@@ -474,6 +520,15 @@ impl Index {
     /// Builds the index again from the files. The new file replaces the old one only when it is complete.
     pub fn rebuild(series_dir: &Path) -> Result<()> {
         rebuild(series_dir)
+    }
+
+    /// An index in memory, as it would be without the answer of one kind to one episode. A prompt
+    /// for that episode and kind comes from it, so a new answer replaces the old one whole.
+    pub fn without(series_dir: &Path, kind: PromptKind, episode: u32) -> Result<Index> {
+        let data = load(series_dir, Some((kind, episode)))?;
+        let mut connection = Connection::open_in_memory()?;
+        fill(&mut connection, &data)?;
+        Ok(Index { connection })
     }
 
     /// Each episode with its progress for the speakers.
@@ -518,34 +573,89 @@ impl Index {
         Ok(progress)
     }
 
-    /// Every suggestion with its review, as it was at the last rebuild.
-    pub fn suggestions(&self) -> Result<Vec<(Suggestion, Review)>> {
-        let mut statement = self
+    /// The entities, the facts, and the scenes that the answers gave, in story order.
+    pub fn data(&self) -> Result<DataView> {
+        let entities = self
             .connection
-            .prepare("SELECT id, status, blocked, content FROM suggestions")?;
-        let rows = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, bool>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        })?;
-        let mut suggestions = Vec::new();
-        for row in rows {
-            let (id, status, blocked, content) = row?;
-            suggestions.push((
-                Suggestion {
-                    id: SuggestionId(id),
-                    content: serde_json::from_str(&content)?,
-                },
-                Review {
-                    status: enum_from_text(&status)?,
-                    blocked,
-                },
-            ));
+            .prepare(
+                "SELECT name, kind, reading, since_episode, since_ms FROM entities
+                 ORDER BY since_episode, since_ms, name",
+            )?
+            .query_map([], |row| {
+                Ok(EntityRow {
+                    name: row.get(0)?,
+                    kind: row.get(1)?,
+                    reading: row.get(2)?,
+                    since: Position {
+                        episode: row.get(3)?,
+                        time_ms: row.get(4)?,
+                    },
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let fact_rows = self
+            .connection
+            .prepare(
+                "SELECT id, since_episode, since_ms, text FROM facts
+                 ORDER BY since_episode, since_ms, id",
+            )?
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    Position {
+                        episode: row.get(1)?,
+                        time_ms: row.get(2)?,
+                    },
+                    row.get::<_, String>(3)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut entities_statement = self
+            .connection
+            .prepare("SELECT entity_id FROM fact_entities WHERE fact_id = ?1 ORDER BY rowid")?;
+        let mut evidence_statement = self.connection.prepare(
+            "SELECT f.line_id FROM fact_evidence f JOIN lines l ON l.id = f.line_id
+             WHERE f.fact_id = ?1 ORDER BY l.episode, l.start_ms",
+        )?;
+        let mut facts = Vec::new();
+        for (id, since, text) in fact_rows {
+            let names = entities_statement
+                .query_map(params![id], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let evidence = evidence_statement
+                .query_map(params![id], |row| row.get::<_, String>(0))?
+                .map(|line| self.evidence_text(&LineId(line?)))
+                .collect::<Result<Vec<_>>>()?;
+            facts.push(FactRow {
+                since,
+                entities: names,
+                text,
+                evidence,
+            });
         }
-        Ok(suggestions)
+
+        let scenes = self
+            .connection
+            .prepare(
+                "SELECT episode, start_ms, end_ms, place_id, summary FROM scenes
+                 ORDER BY episode, start_ms, id",
+            )?
+            .query_map([], |row| {
+                Ok(SceneRow {
+                    episode: row.get(0)?,
+                    start_ms: row.get(1)?,
+                    end_ms: row.get(2)?,
+                    place: row.get(3)?,
+                    summary: row.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(DataView {
+            entities,
+            facts,
+            scenes,
+        })
     }
 
     /// One line of evidence, for example `E1 00:10 わたし 持つ！`.
@@ -571,33 +681,25 @@ impl Index {
     }
 
     /// The input of a Speakers prompt. It fails when an episode has no `Ja` subtitle.
-    pub fn speakers_input(&self, episodes: &[u32]) -> Result<SpeakersInput> {
-        let mut labels = BTreeSet::new();
-        let mut colors = BTreeSet::new();
-        for &episode in episodes {
-            require_subtitle(&self.connection, episode)?;
-            labels.extend(unapproved_labels(&self.connection, episode)?);
-            colors.extend(unapproved_colors(&self.connection, episode)?);
-        }
+    pub fn speakers_input(&self, episode: u32) -> Result<SpeakersInput> {
+        require_subtitle(&self.connection, episode)?;
         Ok(SpeakersInput {
-            lines: self.prompt_lines(episodes)?,
-            entities: entities(&self.connection, Some(CHARACTER))?,
-            labels: labels.into_iter().collect(),
-            colors: colors.into_iter().collect(),
+            lines: self.episode_lines(episode)?,
+            entities: entities(&self.connection, Some(CHARACTER), episode)?,
+            labels: unmapped_labels(&self.connection, episode)?,
+            colors: unmapped_colors(&self.connection, episode)?,
         })
     }
 
     /// The input of a Story prompt. It fails when an episode has no `Ja` subtitle. The known
-    /// facts are the facts before the first episode.
-    pub fn story_input(&self, episodes: &[u32]) -> Result<StoryInput> {
-        for &episode in episodes {
-            require_subtitle(&self.connection, episode)?;
-        }
-        let first = episodes.iter().min().copied().unwrap_or_default();
+    /// entities are the ones known by the end of the episode. The known facts are the facts
+    /// before the episode.
+    pub fn story_input(&self, episode: u32) -> Result<StoryInput> {
+        require_subtitle(&self.connection, episode)?;
         Ok(StoryInput {
-            lines: self.prompt_lines(episodes)?,
-            entities: entities(&self.connection, None)?,
-            facts: known_facts(&self.connection, first)?,
+            lines: self.episode_lines(episode)?,
+            entities: entities(&self.connection, None, episode)?,
+            facts: known_facts(&self.connection, episode)?,
         })
     }
 
@@ -611,15 +713,6 @@ impl Index {
             scenes: package_scenes(&self.connection, at)?,
             lines: package_lines(&self.connection, at)?,
         })
-    }
-
-    /// The lines of the episodes in order, with their current speakers.
-    fn prompt_lines(&self, episodes: &[u32]) -> Result<Vec<PromptLine>> {
-        let mut lines = Vec::new();
-        for &episode in episodes {
-            lines.extend(self.episode_lines(episode)?);
-        }
-        Ok(lines)
     }
 
     /// The lines of one episode in time order, with their current speakers.
@@ -709,32 +802,36 @@ fn speakers_of_episode(connection: &Connection, episode: u32) -> Result<HashMap<
     Ok(speakers)
 }
 
-/// The approved entities in the order they were added. `kind` `None` gives all kinds.
-fn entities(connection: &Connection, kind: Option<&str>) -> Result<Vec<Entity>> {
+/// The entities that are known by the end of the episode, in the order they were added. `kind`
+/// `None` gives all kinds. A later entity is left out.
+fn entities(connection: &Connection, kind: Option<&str>, episode: u32) -> Result<Vec<Entity>> {
     let mut statement = connection.prepare(
-        "SELECT id, kind, name, reading FROM entities
-         WHERE ?1 IS NULL OR kind = ?1 ORDER BY since_episode, since_ms, id",
+        "SELECT name, kind, reading FROM entities
+         WHERE (?1 IS NULL OR kind = ?1) AND since_episode <= ?2
+         ORDER BY since_episode, since_ms, name",
     )?;
     let entities = statement
-        .query_map(params![kind], entity_from_row)?
+        .query_map(params![kind, episode], entity_from_row)?
         .collect::<rusqlite::Result<_>>()?;
     Ok(entities)
 }
 
+/// An entity is its name, so the name is also its ID.
 fn entity_from_row(row: &Row<'_>) -> rusqlite::Result<Entity> {
+    let name: String = row.get(0)?;
     Ok(Entity {
-        id: EntityId(row.get(0)?),
+        id: EntityId(name.clone()),
         kind: row.get(1)?,
-        name: row.get(2)?,
-        reading: row.get(3)?,
+        name,
+        reading: row.get(2)?,
     })
 }
 
 /// The entities that are known at the position. A later entity is left out.
 fn known_entities(connection: &Connection, at: Position) -> Result<Vec<Entity>> {
     let mut statement = connection.prepare(
-        "SELECT id, kind, name, reading FROM entities
-         WHERE (since_episode, since_ms) <= (?1, ?2) ORDER BY since_episode, since_ms, id",
+        "SELECT name, kind, reading FROM entities
+         WHERE (since_episode, since_ms) <= (?1, ?2) ORDER BY since_episode, since_ms, name",
     )?;
     let entities = statement
         .query_map(params![at.episode, at.time_ms], entity_from_row)?
@@ -845,7 +942,7 @@ fn package_line(connection: &Connection, id: &str) -> Result<PackageLine> {
     })
 }
 
-/// The approved facts that start before the episode, in time order.
+/// The facts that start before the episode, in time order.
 fn known_facts(connection: &Connection, episode: u32) -> Result<Vec<PromptFact>> {
     let mut statement = connection.prepare(
         "SELECT id, since_episode, since_ms, text FROM facts
@@ -862,10 +959,8 @@ fn known_facts(connection: &Connection, episode: u32) -> Result<Vec<PromptFact>>
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    let mut names = connection.prepare(
-        "SELECT e.name FROM fact_entities f JOIN entities e ON e.id = f.entity_id
-         WHERE f.fact_id = ?1 ORDER BY f.rowid",
-    )?;
+    let mut names = connection
+        .prepare("SELECT entity_id FROM fact_entities WHERE fact_id = ?1 ORDER BY rowid")?;
     let mut facts = Vec::new();
     for (id, since_episode, since_ms, text) in rows {
         let entities = names
@@ -883,8 +978,8 @@ fn known_facts(connection: &Connection, episode: u32) -> Result<Vec<PromptFact>>
     Ok(facts)
 }
 
-/// The parts of the labels of one episode that have no approved label.
-fn unapproved_labels(connection: &Connection, episode: u32) -> Result<Vec<String>> {
+/// The parts of the labels of one episode that have no meaning yet.
+fn unmapped_labels(connection: &Connection, episode: u32) -> Result<Vec<String>> {
     let mut statement = connection.prepare(
         "SELECT DISTINCT speaker_label FROM lines WHERE episode = ?1 AND speaker_label IS NOT NULL",
     )?;
@@ -895,12 +990,12 @@ fn unapproved_labels(connection: &Connection, episode: u32) -> Result<Vec<String
     let mut parts: BTreeSet<String> = BTreeSet::new();
     for label in labels {
         for part in label.split('・') {
-            let approved: bool = connection.query_row(
+            let mapped: bool = connection.query_row(
                 "SELECT COUNT(*) > 0 FROM speaker_labels WHERE label = ?1",
                 params![part],
                 |row| row.get(0),
             )?;
-            if !approved {
+            if !mapped {
                 parts.insert(part.to_string());
             }
         }
@@ -908,7 +1003,7 @@ fn unapproved_labels(connection: &Connection, episode: u32) -> Result<Vec<String
     Ok(parts.into_iter().collect())
 }
 
-fn unapproved_colors(connection: &Connection, episode: u32) -> Result<Vec<u32>> {
+fn unmapped_colors(connection: &Connection, episode: u32) -> Result<Vec<u32>> {
     let mut statement = connection.prepare(
         "SELECT DISTINCT color FROM lines WHERE episode = ?1 AND color IS NOT NULL
          AND color NOT IN (SELECT color FROM speaker_colors) ORDER BY color",

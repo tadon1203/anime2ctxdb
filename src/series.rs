@@ -1,20 +1,18 @@
 mod index;
 
-pub use index::EpisodeProgress;
+pub use index::{DataView, EntityRow, EpisodeProgress, FactRow, SceneRow};
 
 use index::Index;
 
-use crate::files::{enum_text, write_atomic};
+use crate::answers::answer;
+use crate::answers::prompt::{self, Prompt, PromptKind};
+use crate::files::write_atomic;
 use crate::model::Position;
 use crate::package;
 use crate::sources::{self, Problem, Scan, Source, SourceId};
-use crate::suggestions::prompt::{self, AnswerFile, Prompt, PromptKind};
-use crate::suggestions::suggestion::{
-    self, Action, Content, Decision, Status, Suggestion, SuggestionId, SuggestionKind,
-};
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use fs4::FileExt;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 
@@ -26,7 +24,7 @@ pub struct Series {
 }
 
 /// The files and directories that every series directory has.
-const SERIES_ENTRIES: [&str; 4] = ["sources.jsonl", "decisions.jsonl", "sources", "answers"];
+const SERIES_ENTRIES: [&str; 3] = ["sources.jsonl", "sources", "answers"];
 
 /// Checks that a new series can use the directory: it is missing or empty.
 fn check_new_dir(dir: &Path) -> Result<()> {
@@ -37,31 +35,6 @@ fn check_new_dir(dir: &Path) -> Result<()> {
         ensure!(entries.next().is_none(), "{} is not empty", dir.display());
     }
     Ok(())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SuggestionFilter {
-    pub status: Option<Status>,
-    pub kind: Option<SuggestionKind>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SuggestionRow {
-    pub id: SuggestionId,
-    pub kind: SuggestionKind,
-    /// For example `label "あんな" -> 明智あんな`.
-    pub content: String,
-    /// For example `E1 00:10 わたし 持つ！`.
-    pub evidence: Vec<String>,
-    pub status: Status,
-    pub blocked: bool,
-}
-
-/// How many suggestions a call changed and how many it skipped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Decided {
-    pub applied: usize,
-    pub skipped: usize,
 }
 
 /// How many sources a call removed and how many it kept because an answer uses them.
@@ -96,10 +69,8 @@ impl Series {
             fs::create_dir_all(&path)
                 .with_context(|| format!("cannot create {}", path.display()))?;
         }
-        for name in ["sources.jsonl", "decisions.jsonl"] {
-            let path = dir.join(name);
-            File::create(&path).with_context(|| format!("cannot create {}", path.display()))?;
-        }
+        let path = dir.join("sources.jsonl");
+        File::create(&path).with_context(|| format!("cannot create {}", path.display()))?;
         Index::rebuild(dir)?;
         Ok(Series {
             dir: dir.to_path_buf(),
@@ -210,109 +181,15 @@ impl Series {
         })
     }
 
-    pub fn suggestions(&self, filter: &SuggestionFilter) -> Result<Vec<SuggestionRow>> {
-        let index = Index::open(&self.dir)?;
-        let mut all = index.suggestions()?;
-        all.sort_by_key(|(suggestion, _)| suggestion.id.sort_key());
-
-        let names: HashMap<String, String> = all
-            .iter()
-            .filter_map(|(suggestion, _)| match &suggestion.content {
-                Content::Entity { name, .. } => Some((suggestion.id.0.clone(), name.clone())),
-                _ => None,
-            })
-            .collect();
-
-        let mut rows = Vec::new();
-        for (suggestion, review) in all {
-            let kind = suggestion.content.kind();
-            if filter.status.is_some_and(|status| status != review.status) {
-                continue;
-            }
-            if filter.kind.is_some_and(|wanted| wanted != kind) {
-                continue;
-            }
-            let evidence = evidence_of(&index, &suggestion.content)?;
-            rows.push(SuggestionRow {
-                content: suggestion.content.describe(&names),
-                id: suggestion.id,
-                kind,
-                evidence,
-                status: review.status,
-                blocked: review.blocked,
-            });
-        }
-        Ok(rows)
-    }
-
-    /// Applies the decisions in the given order. A decision on a suggestion that cannot take it is skipped.
-    pub fn decide(&self, ids: &[SuggestionId], action: Action) -> Result<Decided> {
-        let _lock = write_lock(&self.dir)?;
-        let all = {
-            let index = Index::open(&self.dir)?;
-            index.suggestions()?
-        };
-        let suggestions: Vec<Suggestion> = all
-            .iter()
-            .map(|(suggestion, _)| suggestion.clone())
-            .collect();
-        let mut working = suggestion::read_decisions(&self.dir)?;
-        let mut appended: Vec<Decision> = Vec::new();
-        let mut done = 0;
-        let mut skipped = 0;
-
-        for id in ids {
-            let reviews = suggestion::reviews(&suggestions, &working);
-            let Some(review) = reviews.get(id) else {
-                bail!("unknown suggestion {id}");
-            };
-            let taken: HashSet<String> = suggestions
-                .iter()
-                .filter(|other| {
-                    reviews
-                        .get(&other.id)
-                        .is_some_and(|s| s.status == Status::Approved && !s.blocked)
-                })
-                .filter_map(|other| other.content.unique_key())
-                .collect();
-            let key_taken = suggestions
-                .iter()
-                .find(|other| &other.id == id)
-                .and_then(|other| other.content.unique_key())
-                .is_some_and(|key| taken.contains(&key));
-            let allowed = match action {
-                Action::Approve => {
-                    review.status == Status::Pending && !review.blocked && !key_taken
-                }
-                Action::Reject => review.status == Status::Pending,
-                Action::Revoke => matches!(review.status, Status::Approved | Status::Rejected),
-            };
-            if allowed {
-                let decision = Decision {
-                    suggestion: id.clone(),
-                    action,
-                };
-                working.push(decision.clone());
-                appended.push(decision);
-                done += 1;
-            } else {
-                skipped += 1;
-            }
-        }
-
-        if !appended.is_empty() {
-            suggestion::append_decisions(&self.dir, &appended)?;
-            Index::rebuild(&self.dir)?;
-        }
-        Ok(Decided {
-            applied: done,
-            skipped,
-        })
-    }
-
     pub fn progress(&self) -> Result<Vec<EpisodeProgress>> {
         let index = Index::open(&self.dir)?;
         index.progress()
+    }
+
+    /// The entities, the facts, and the scenes that the answers gave.
+    pub fn data(&self) -> Result<DataView> {
+        let index = Index::open(&self.dir)?;
+        index.data()
     }
 
     /// Makes the context package at one position, as YAML text. Nothing is saved.
@@ -324,70 +201,40 @@ impl Series {
         Ok(package::build(&input))
     }
 
-    /// Makes the prompt for one or more episodes. Nothing is saved. The same series and episodes
-    /// give the same prompt, until the user approves or revokes a suggestion.
-    pub fn prompt(&self, kind: PromptKind, episodes: &[u32]) -> Result<Prompt> {
-        let episodes = sorted_episodes(episodes)?;
-        let index = Index::open(&self.dir)?;
-        make_prompt(&index, kind, &episodes)
+    /// Makes the prompt for one episode. Nothing is saved. The prompt is made as if the episode had
+    /// no answer of this kind, so the answer to it replaces the old answer whole.
+    pub fn prompt(&self, kind: PromptKind, episode: u32) -> Result<Prompt> {
+        let index = Index::without(&self.dir, kind, episode)?;
+        make_prompt(&index, kind, episode)
     }
 
     /// The episodes that have an answer of this kind.
     pub fn answered_episodes(&self, kind: PromptKind) -> Result<BTreeSet<u32>> {
-        Ok(prompt::read_answers(&self.dir)?
+        Ok(answer::read_answers(&self.dir)?
             .into_iter()
-            .filter(|(_, answer)| answer.kind == kind)
-            .flat_map(|(_, answer)| answer.episodes)
+            .filter(|answer| answer.kind() == kind)
+            .map(|answer| answer.episode())
             .collect())
     }
 
-    /// Reads the answer to the prompt for `episodes`, writes its suggestions to a new answer
-    /// file, and rebuilds the index. An episode can have one answer of each kind.
-    pub fn submit_answer(&self, kind: PromptKind, episodes: &[u32], text: &str) -> Result<usize> {
-        let episodes = sorted_episodes(episodes)?;
+    /// Reads the answer to the prompt for one episode, writes it to the answer file of the episode
+    /// and the kind, and rebuilds the index. A new answer replaces the old one whole. Returns the
+    /// number of entries in the answer.
+    pub fn submit_answer(&self, kind: PromptKind, episode: u32, text: &str) -> Result<usize> {
         let _lock = write_lock(&self.dir)?;
-        let answers = prompt::read_answers(&self.dir)?;
-        for episode in &episodes {
-            ensure!(
-                !answers
-                    .iter()
-                    .any(|(_, answer)| answer.kind == kind && answer.episodes.contains(episode)),
-                "episode {episode} already has a {} answer",
-                enum_text(&kind)
-            );
-        }
-        let prompt = {
-            let index = Index::open(&self.dir)?;
-            make_prompt(&index, kind, &episodes)?
-        };
-        let number = answers.last().map_or(1, |(number, _)| number + 1);
-        let suggestions = prompt::parse_answer(&prompt, number, text)?;
-        let count = suggestions.len();
-        let file = AnswerFile {
-            kind,
-            episodes,
-            suggestions,
-        };
-        let path = self.dir.join("answers").join(format!("{number}.json"));
-        write_atomic(&path, &serde_json::to_string_pretty(&file)?)?;
+        let prompt = self.prompt(kind, episode)?;
+        let answer = prompt::parse_answer(&prompt, text)?;
+        let path = answer::answer_path(&self.dir, kind, episode);
+        write_atomic(&path, &serde_json::to_string_pretty(&answer)?)?;
         Index::rebuild(&self.dir)?;
-        Ok(count)
+        Ok(answer.count())
     }
 }
 
-/// The episodes in order, with no repeat. A prompt needs at least one.
-fn sorted_episodes(episodes: &[u32]) -> Result<Vec<u32>> {
-    let mut episodes = episodes.to_vec();
-    episodes.sort_unstable();
-    episodes.dedup();
-    ensure!(!episodes.is_empty(), "a prompt needs at least one episode");
-    Ok(episodes)
-}
-
-fn make_prompt(index: &Index, kind: PromptKind, episodes: &[u32]) -> Result<Prompt> {
+fn make_prompt(index: &Index, kind: PromptKind, episode: u32) -> Result<Prompt> {
     Ok(match kind {
-        PromptKind::Speakers => prompt::speakers::make(episodes, &index.speakers_input(episodes)?),
-        PromptKind::Story => prompt::story::make(episodes, &index.story_input(episodes)?),
+        PromptKind::Speakers => prompt::speakers::make(episode, &index.speakers_input(episode)?),
+        PromptKind::Story => prompt::story::make(episode, &index.story_input(episode)?),
     })
 }
 
@@ -403,12 +250,4 @@ fn write_lock(dir: &Path) -> Result<File> {
         .with_context(|| format!("cannot open {}", path.display()))?;
     FileExt::lock(&file).with_context(|| format!("cannot lock {}", path.display()))?;
     Ok(file)
-}
-
-fn evidence_of(index: &Index, content: &Content) -> Result<Vec<String>> {
-    content
-        .evidence_lines()
-        .iter()
-        .map(|line| index.evidence_text(line))
-        .collect()
 }

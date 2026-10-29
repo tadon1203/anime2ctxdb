@@ -1,11 +1,10 @@
-use super::{App, count_of};
+use super::App;
 use anime2ctxdb::{EpisodeProgress, PromptKind};
 use eframe::egui;
 
 impl App {
-    /// The episode list. A click on any part of a row selects an episode with a subtitle.
-    /// Ctrl and click adds or removes one episode. Shift and click selects a range. The up and
-    /// down keys move the selection when no text box has the focus.
+    /// The episode list. A click on any part of a row selects an episode with a subtitle. The up
+    /// and down keys move the selection when no text box has the focus.
     fn episode_list(&mut self, ui: &mut egui::Ui) {
         let selectable: Vec<u32> = self
             .progress
@@ -27,7 +26,7 @@ impl App {
                 (step, Some(index)) => selectable.get(index.saturating_add_signed(step as isize)),
             };
             if let Some(episode) = next {
-                self.select_only(*episode);
+                self.episode = Some(*episode);
             }
         }
 
@@ -36,22 +35,13 @@ impl App {
             .default_size(360.0)
             .size_range(280.0..=560.0)
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if ui.small_button("Select all").clicked() {
-                        self.selected.extend(selectable.iter().copied());
-                    }
-                    if ui.small_button("Clear").clicked() {
-                        self.selected.clear();
-                    }
-                    ui.weak("Ctrl and Shift select more than one.");
-                });
                 list_header(ui);
                 let mut clicked = None;
                 egui::ScrollArea::vertical()
                     .auto_shrink(false)
                     .show(ui, |ui| {
                         for item in &self.progress {
-                            let selected = self.selected.contains(&item.episode);
+                            let selected = self.episode == Some(item.episode);
                             let answered = answered_text(
                                 self.speakers_answered.contains(&item.episode),
                                 self.story_answered.contains(&item.episode),
@@ -61,42 +51,10 @@ impl App {
                             }
                         }
                     });
-                if let Some(episode) = clicked {
-                    let modifiers = ui.input(|input| input.modifiers);
-                    if modifiers.shift {
-                        self.select_range(&selectable, episode);
-                    } else if modifiers.command {
-                        if !self.selected.remove(&episode) {
-                            self.selected.insert(episode);
-                        }
-                        self.episode = Some(episode);
-                    } else {
-                        self.select_only(episode);
-                    }
+                if clicked.is_some() {
+                    self.episode = clicked;
                 }
             });
-    }
-
-    /// Selects one episode and starts the range from it.
-    fn select_only(&mut self, episode: u32) {
-        self.selected.clear();
-        self.selected.insert(episode);
-        self.episode = Some(episode);
-    }
-
-    /// Selects the episodes from the one that the user picked last to `episode`.
-    fn select_range(&mut self, selectable: &[u32], episode: u32) {
-        let from = self
-            .episode
-            .and_then(|start| selectable.iter().position(|item| *item == start));
-        let to = selectable.iter().position(|item| *item == episode);
-        let (Some(from), Some(to)) = (from, to) else {
-            self.select_only(episode);
-            return;
-        };
-        self.selected.clear();
-        self.selected
-            .extend(selectable[from.min(to)..=from.max(to)].iter().copied());
     }
 
     pub(super) fn prompts_tab(&mut self, ui: &mut egui::Ui) {
@@ -109,10 +67,9 @@ impl App {
             ui.selectable_value(&mut self.prompt_kind, PromptKind::Speakers, "Speakers");
             ui.selectable_value(&mut self.prompt_kind, PromptKind::Story, "Story");
             ui.separator();
-            match self.selected.len() {
-                0 => ui.weak("Select an episode"),
-                1 => ui.strong(format!("Episode {}", self.selected.first().unwrap_or(&0))),
-                many => ui.strong(count_of(many, "episode")),
+            match self.episode {
+                Some(episode) => ui.strong(format!("Episode {episode}")),
+                None => ui.weak("Select an episode"),
             };
         });
         ui.separator();
@@ -126,22 +83,22 @@ impl App {
         {
             self.copy_text(&ctx, text, "Copied the prompt.");
         }
-        if let Some((kind, episodes)) = self
+        if let Some((kind, episode)) = self
             .prompt
             .as_ref()
             .filter(|_| submit)
-            .map(|prompt| (prompt.kind, prompt.episodes.clone()))
+            .map(|prompt| (prompt.kind, prompt.episode))
         {
             let answer = match kind {
                 PromptKind::Speakers => self.speakers_answer.clone(),
                 PromptKind::Story => self.story_answer.clone(),
             };
-            self.submit(&ctx, kind, episodes, answer);
+            self.submit(&ctx, kind, episode, answer);
         }
     }
 
-    /// Makes the prompt again when the kind, the selected episodes, or the data changed since the
-    /// last time. It waits while a job runs, because the job may write the index.
+    /// Makes the prompt again when the kind, the episode, or the data changed since the last time.
+    /// It waits while a job runs, because the job may change the files that the prompt needs.
     fn refresh_prompt(&mut self) {
         let Some(series) = &self.series else {
             return;
@@ -149,24 +106,24 @@ impl App {
         if self.busy() {
             return;
         }
-        let episodes: Vec<u32> = self.selected.iter().copied().collect();
-        let key = (self.prompt_kind, episodes, self.data_version);
-        if self.prompt_key.as_ref() == Some(&key) {
-            return;
-        }
-        if key.1.is_empty() {
+        let Some(episode) = self.episode else {
             self.prompt = None;
             self.prompt_error = None;
-        } else {
-            match series.prompt(key.0, &key.1) {
-                Ok(prompt) => {
-                    self.prompt = Some(prompt);
-                    self.prompt_error = None;
-                }
-                Err(error) => {
-                    self.prompt = None;
-                    self.prompt_error = Some(format!("{error:#}"));
-                }
+            self.prompt_key = None;
+            return;
+        };
+        let key = (self.prompt_kind, episode, self.data_version);
+        if self.prompt_key == Some(key) {
+            return;
+        }
+        match series.prompt(key.0, key.1) {
+            Ok(prompt) => {
+                self.prompt = Some(prompt);
+                self.prompt_error = None;
+            }
+            Err(error) => {
+                self.prompt = None;
+                self.prompt_error = Some(format!("{error:#}"));
             }
         }
         self.prompt_key = Some(key);
@@ -184,12 +141,7 @@ impl App {
                 PromptKind::Speakers => &self.speakers_answered,
                 PromptKind::Story => &self.story_answered,
             };
-            let done: Vec<String> = prompt
-                .episodes
-                .iter()
-                .filter(|episode| answered.contains(episode))
-                .map(u32::to_string)
-                .collect();
+            let replaces = answered.contains(&prompt.episode);
             let answer = match prompt.kind {
                 PromptKind::Speakers => &mut self.speakers_answer,
                 PromptKind::Story => &mut self.story_answer,
@@ -200,8 +152,8 @@ impl App {
 
             ui.horizontal(|ui| {
                 ui.strong(format!(
-                    "Prompt for {} ({})",
-                    episodes_text(&prompt.episodes),
+                    "Prompt for episode {} ({})",
+                    prompt.episode,
                     kind_text(prompt.kind)
                 ));
                 events.copy = ui.add_enabled(!busy, egui::Button::new(label)).clicked();
@@ -212,24 +164,22 @@ impl App {
             ui.horizontal(|ui| {
                 ui.strong("Answer");
                 let why_not = if busy {
-                    Some("Wait for the current job to finish.".to_string())
-                } else if !done.is_empty() {
-                    Some(format!(
-                        "Episode {} already has a {} answer.",
-                        done.join(", "),
-                        kind_text(prompt.kind)
-                    ))
+                    Some("Wait for the current job to finish.")
                 } else if answer.trim().is_empty() {
-                    Some("Paste an answer first.".to_string())
+                    Some("Paste an answer first.")
                 } else {
                     None
                 };
-                let button = ui.add_enabled(why_not.is_none(), egui::Button::new("Submit"));
+                let label = if replaces { "Replace answer" } else { "Submit" };
+                let button = ui.add_enabled(why_not.is_none(), egui::Button::new(label));
                 match why_not {
                     Some(reason) => {
                         button.on_disabled_hover_text(reason);
                     }
                     None => events.submit = button.clicked(),
+                }
+                if replaces {
+                    ui.weak("This episode has an answer. A new answer replaces it.");
                 }
             });
             text_area(
@@ -240,7 +190,7 @@ impl App {
                 "Paste the answer of the AI chat here.",
             );
         } else if self.series.is_some() {
-            ui.weak("Select episodes. The prompt shows here. Copy it to an AI chat and paste the answer below it.");
+            ui.weak("Select an episode. The prompt shows here. Copy it to an AI chat and paste the answer below it.");
         }
         events
     }
@@ -251,17 +201,6 @@ impl App {
 struct PromptEvents {
     copy: bool,
     submit: bool,
-}
-
-/// The episodes in words, for example `episode 1` or `episodes 1, 2`.
-fn episodes_text(episodes: &[u32]) -> String {
-    let numbers: Vec<String> = episodes.iter().map(u32::to_string).collect();
-    let noun = if episodes.len() == 1 {
-        "episode"
-    } else {
-        "episodes"
-    };
-    format!("{noun} {}", numbers.join(", "))
 }
 
 fn kind_text(kind: PromptKind) -> &'static str {

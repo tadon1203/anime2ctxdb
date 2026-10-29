@@ -1,4 +1,4 @@
-Find who speaks each line in {{episodes}} of an anime.
+Find who speaks each line in {{episode}} of an anime.
 
 Known characters:
 {{characters}}
@@ -13,6 +13,7 @@ Tell me:
 - for each new character, the line IDs that show it (the smallest set). Make a character of a person with no name if you can tell that the person comes back often. Do not make a character of a one-time extra. Give the label of an extra the kind "other", and give its lines no character.
 
 Use only this transcript, not other knowledge of the series. Leave out what you cannot tell from it.
+Name a character exactly as in the list of known characters, or as you give it in the new characters.
 
 Reply with one JSON object in this format:
 {{format}}

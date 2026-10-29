@@ -1,5 +1,5 @@
 use super::{App, count_of};
-use anime2ctxdb::{Action, SourceId, SuggestionId};
+use anime2ctxdb::SourceId;
 use eframe::egui;
 use std::path::PathBuf;
 
@@ -9,8 +9,6 @@ pub(super) enum Confirm {
     DiscardNew,
     /// Open another series (`Some`) or go to the start view (`None`) and lose the new files.
     Leave(Option<PathBuf>),
-    /// Approve every pending suggestion in the list.
-    ApproveShown(Vec<SuggestionId>),
     /// Remove saved sources. The ones in `blocked` stay, because an answer uses them.
     Remove {
         ids: Vec<SourceId>,
@@ -29,9 +27,6 @@ impl Confirm {
             }
             Confirm::DiscardNew => format!("Discard {}?", count_of(app.detected.len(), "new file")),
             Confirm::Leave(_) => "Leave without saving?".to_string(),
-            Confirm::ApproveShown(ids) => {
-                format!("Approve {}?", count_of(ids.len(), "suggestion"))
-            }
         }
     }
 
@@ -74,10 +69,6 @@ impl Confirm {
                 "{} not saved yet. They are lost if you leave.",
                 count_of(app.detected.len(), "new file")
             ),
-            Confirm::ApproveShown(_) => {
-                "Every pending suggestion in the list becomes data. You can revoke each one later."
-                    .to_string()
-            }
         }
     }
 
@@ -86,7 +77,6 @@ impl Confirm {
             Confirm::Remove { .. } => "Remove",
             Confirm::DiscardNew => "Discard",
             Confirm::Leave(_) => "Leave",
-            Confirm::ApproveShown(_) => "Approve",
         }
     }
 }
@@ -130,7 +120,6 @@ impl App {
                 self.failures.clear();
             }
             Confirm::Leave(target) => self.go_to(ctx, target),
-            Confirm::ApproveShown(ids) => self.decide(ctx, ids, Action::Approve),
             Confirm::Remove { ids, .. } => self.remove_sources(ctx, ids),
         }
     }

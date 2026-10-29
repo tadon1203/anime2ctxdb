@@ -1,113 +1,133 @@
 mod common;
 
-use anime2ctxdb::{
-    Action, PromptKind, Series, Status, SuggestionFilter, SuggestionKind, SuggestionRow,
-};
-use common::{approve_all_pending, series_with_episodes};
+use anime2ctxdb::PromptKind;
+use common::series_with_episodes;
 use tempfile::TempDir;
 
 const STORY_ANSWER: &str = r#"{
-  "new_entities": [{ "ref": "N1", "kind": "place", "name": "教室", "evidence": ["L1"] }],
-  "facts": [{ "entities": ["N1"], "text": "教室で話す", "evidence": ["L3"] }]
+  "new_entities": [{ "kind": "place", "name": "教室", "evidence": ["L1"] }],
+  "facts": [{ "entities": ["教室"], "text": "教室で話す", "evidence": ["L3"] }]
 }"#;
 
 const NO_EVIDENCE: &str = r#"{
   "facts": [{ "entities": [], "text": "何もない", "evidence": [] }]
 }"#;
 
-fn all_rows(series: &Series) -> Vec<SuggestionRow> {
-    series
-        .suggestions(&SuggestionFilter {
-            status: None,
-            kind: None,
-        })
-        .expect("the suggestions load")
-}
+const SECOND_EPISODE: &str = r#"{
+  "facts": [{ "entities": ["教室"], "text": "また教室にいる", "evidence": ["L2"] }]
+}"#;
 
-fn row_of_kind(series: &Series, kind: SuggestionKind) -> SuggestionRow {
-    all_rows(series)
-        .into_iter()
-        .find(|row| row.kind == kind)
-        .expect("the answer has a suggestion of this kind")
-}
+const OTHER_PLACE: &str = r#"{
+  "new_entities": [{ "kind": "place", "name": "屋上", "evidence": ["L1"] }]
+}"#;
 
 #[test]
 fn a_story_prompt_shows_the_entities_and_facts_from_earlier_episodes() {
     let root = TempDir::new().expect("a temporary directory");
     let series = series_with_episodes(root.path(), 2);
     let first = series
-        .prompt(PromptKind::Story, &[1])
+        .prompt(PromptKind::Story, 1)
         .expect("the prompt is made");
     assert!(
         first
             .text
-            .contains("Known facts before the first episode below:\nnone\n")
+            .contains("Known facts from earlier episodes:\nnone\n")
     );
     series
-        .submit_answer(PromptKind::Story, &[1], STORY_ANSWER)
+        .submit_answer(PromptKind::Story, 1, STORY_ANSWER)
         .expect("the answer is submitted");
-    approve_all_pending(&series);
 
     let second = series
-        .prompt(PromptKind::Story, &[2])
+        .prompt(PromptKind::Story, 2)
         .expect("the prompt is made");
 
     assert_eq!(second.kind, PromptKind::Story);
-    assert!(second.text.contains("T1-1 教室 (place)"));
+    assert!(second.text.contains("教室 (place)"));
     assert!(second.text.contains("[教室] 教室で話す"));
 }
 
 #[test]
-fn a_fact_waits_for_its_entity_and_is_not_known_until_it_is_approved() {
+fn an_answer_gives_entities_and_facts_at_once() {
     let root = TempDir::new().expect("a temporary directory");
-    let series = series_with_episodes(root.path(), 2);
-    series
-        .submit_answer(PromptKind::Story, &[1], STORY_ANSWER)
+    let series = series_with_episodes(root.path(), 1);
+
+    let count = series
+        .submit_answer(PromptKind::Story, 1, STORY_ANSWER)
         .expect("the answer is submitted");
-    let fact = row_of_kind(&series, SuggestionKind::Fact);
 
-    let decided = series
-        .decide(std::slice::from_ref(&fact.id), Action::Approve)
-        .expect("the decision is made");
-
-    assert_eq!((decided.applied, decided.skipped), (0, 1));
-    let second = series
-        .prompt(PromptKind::Story, &[2])
-        .expect("the prompt is made");
-    assert!(
-        second
-            .text
-            .contains("Known facts before the first episode below:\nnone\n")
-    );
+    assert_eq!(count, 2);
+    let data = series.data().expect("the data loads");
+    assert_eq!(data.entities[0].name, "教室");
+    assert_eq!(data.entities[0].kind, "place");
+    assert_eq!(data.facts[0].text, "教室で話す");
+    assert_eq!(data.facts[0].evidence.len(), 1);
 }
 
 #[test]
-fn rejecting_an_entity_makes_its_fact_invalid() {
+fn a_new_answer_replaces_the_old_one_whole() {
     let root = TempDir::new().expect("a temporary directory");
     let series = series_with_episodes(root.path(), 1);
     series
-        .submit_answer(PromptKind::Story, &[1], STORY_ANSWER)
+        .submit_answer(PromptKind::Story, 1, STORY_ANSWER)
         .expect("the answer is submitted");
-    let entity = row_of_kind(&series, SuggestionKind::Entity);
 
     series
-        .decide(std::slice::from_ref(&entity.id), Action::Reject)
-        .expect("the decision is made");
+        .submit_answer(PromptKind::Story, 1, OTHER_PLACE)
+        .expect("the answer is replaced");
 
-    assert_eq!(
-        row_of_kind(&series, SuggestionKind::Fact).status,
-        Status::Invalid
-    );
+    let data = series.data().expect("the data loads");
+    let names: Vec<&str> = data
+        .entities
+        .iter()
+        .map(|entity| entity.name.as_str())
+        .collect();
+    assert_eq!(names, ["屋上"]);
+    assert_eq!(data.facts.len(), 0);
+}
+
+#[test]
+fn a_name_that_loses_its_entity_stays_as_text_in_a_fact() {
+    let root = TempDir::new().expect("a temporary directory");
+    let series = series_with_episodes(root.path(), 2);
+    series
+        .submit_answer(PromptKind::Story, 1, STORY_ANSWER)
+        .expect("the answer is submitted");
+    series
+        .submit_answer(PromptKind::Story, 2, SECOND_EPISODE)
+        .expect("the answer is submitted");
+
+    series
+        .submit_answer(PromptKind::Story, 1, OTHER_PLACE)
+        .expect("the answer is replaced");
+
+    let data = series.data().expect("the data loads");
+    assert_eq!(data.facts.len(), 1);
+    assert_eq!(data.facts[0].entities, ["教室"]);
+    assert!(data.entities.iter().all(|entity| entity.name != "教室"));
+}
+
+#[test]
+fn an_unknown_entity_writes_no_file() {
+    let root = TempDir::new().expect("a temporary directory");
+    let series = series_with_episodes(root.path(), 1);
+
+    let error = series
+        .submit_answer(PromptKind::Story, 1, SECOND_EPISODE)
+        .expect_err("the entity is not known");
+
+    assert!(format!("{error:#}").contains("unknown entity 教室"));
+    assert!(!root.path().join("show/answers/story-1.json").exists());
 }
 
 #[test]
 fn a_fact_without_evidence_writes_no_answer_file() {
     let root = TempDir::new().expect("a temporary directory");
     let series = series_with_episodes(root.path(), 1);
+
     let error = series
-        .submit_answer(PromptKind::Story, &[1], NO_EVIDENCE)
+        .submit_answer(PromptKind::Story, 1, NO_EVIDENCE)
         .expect_err("the fact has no evidence");
 
     assert!(format!("{error:#}").contains("entry 1 of facts has no evidence"));
-    assert!(!root.path().join("show/answers/1.json").exists());
+    assert!(!root.path().join("show/answers/story-1.json").exists());
 }

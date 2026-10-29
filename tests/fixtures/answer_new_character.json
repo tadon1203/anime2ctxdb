@@ -1,8 +1,8 @@
 {
-  "new_characters": [{ "ref": "N1", "name": "明智あんな", "reading": "あけちあんな", "evidence": ["L1"] }],
-  "labels": [{ "label": "あんな", "kind": "character", "character": "N1" },
+  "new_characters": [{ "name": "明智あんな", "reading": "あけちあんな", "evidence": ["L1"] }],
+  "labels": [{ "label": "あんな", "kind": "character", "character": "明智あんな" },
              { "label": "窓の開く音", "kind": "sound" }],
-  "colors": [{ "color": "#FFFF00", "character": "N1" }],
-  "lines": [{ "line": "L2", "characters": ["N1"] },
+  "colors": [{ "color": "#FFFF00", "character": "明智あんな" }],
+  "lines": [{ "line": "L2", "characters": ["明智あんな"] },
             { "line": "L3", "characters": [] }]
 }

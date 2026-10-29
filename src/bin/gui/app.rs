@@ -1,14 +1,14 @@
 mod confirm;
+mod data_tab;
 mod new_series;
 mod package_tab;
 mod prompts_tab;
 mod sources_tab;
 mod startup;
-mod suggestions_tab;
 
 use anime2ctxdb::{
-    Action, EpisodeProgress, Failure, Position, Prompt, PromptKind, Scan, Series, Source, SourceId,
-    Status, SuggestionFilter, SuggestionId, SuggestionRow,
+    DataView, EpisodeProgress, Failure, Position, Prompt, PromptKind, Scan, Series, Source,
+    SourceId,
 };
 use anyhow::Result;
 use eframe::egui;
@@ -37,7 +37,7 @@ enum JobOutput {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Sources,
-    Suggestions,
+    Data,
     Prompts,
     Package,
 }
@@ -88,22 +88,19 @@ pub struct App {
     /// The saved sources as they are on disk. A row that differs from it has unsaved changes.
     saved_base: Vec<Source>,
     saved_view: SavedView,
-    filter: SuggestionFilter,
-    rows: Vec<SuggestionRow>,
+    data: Option<DataView>,
     progress: Vec<EpisodeProgress>,
-    /// The episode that the user picked last. The range selection starts from it.
+    /// The episode that the Prompts tab shows.
     episode: Option<u32>,
-    /// Every episode that is selected in the Prompts tab.
-    selected: BTreeSet<u32>,
     /// The kind of prompt that the Prompts tab shows.
     prompt_kind: PromptKind,
-    /// The prompt for the selected episodes. The app makes it again when the kind, the selection,
+    /// The prompt for the selected episode. The app makes it again when the kind, the selection,
     /// or the data changes.
     prompt: Option<Prompt>,
     /// Why the prompt could not be made.
     prompt_error: Option<String>,
     /// What `prompt` was made for: the kind, the episodes, and `data_version`.
-    prompt_key: Option<(PromptKind, Vec<u32>, u64)>,
+    prompt_key: Option<(PromptKind, u32, u64)>,
     /// Counts the reads of the views. A new number means that the data may have changed.
     data_version: u64,
     speakers_answer: String,
@@ -143,14 +140,9 @@ impl App {
             saved: Vec::new(),
             saved_base: Vec::new(),
             saved_view: SavedView::default(),
-            filter: SuggestionFilter {
-                status: Some(Status::Pending),
-                kind: None,
-            },
-            rows: Vec::new(),
+            data: None,
             progress: Vec::new(),
             episode: None,
-            selected: BTreeSet::new(),
             prompt_kind: PromptKind::Speakers,
             prompt: None,
             prompt_error: None,
@@ -391,19 +383,18 @@ impl App {
         let Some(series) = &self.series else {
             return;
         };
-        match load_views(series, self.filter) {
+        match load_views(series) {
             Ok(views) => {
                 self.saved_base.clone_from(&views.saved);
                 self.saved_view.keep_saved(&views.saved);
                 self.saved = views.saved;
-                self.rows = views.rows;
+                self.data = Some(views.data);
                 self.progress = views.progress;
                 self.speakers_answered = views.speakers_answered;
                 self.story_answered = views.story_answered;
                 self.data_version += 1;
                 if self.episode.is_none() {
                     self.episode = first_unfinished(&self.progress);
-                    self.selected.extend(self.episode);
                 }
             }
             Err(error) => self.error = Some(format!("{error:#}")),
@@ -440,7 +431,6 @@ impl App {
         self.speakers_answer.clear();
         self.story_answer.clear();
         self.episode = None;
-        self.selected.clear();
         self.package_episode = None;
         self.package_time_error = None;
         self.package = None;
@@ -456,7 +446,7 @@ impl App {
         self.failures.clear();
         self.saved.clear();
         self.saved_base.clear();
-        self.rows.clear();
+        self.data = None;
         self.progress.clear();
         self.status.clear();
         self.load_series_list();
@@ -568,25 +558,6 @@ impl App {
         });
     }
 
-    fn decide(&mut self, ctx: &egui::Context, ids: Vec<SuggestionId>, action: Action) {
-        let Some(series) = self.series.clone() else {
-            return;
-        };
-        self.start(ctx, move || {
-            let decided = series.decide(&ids, action)?;
-            let verb = match action {
-                Action::Approve => "Approved",
-                Action::Reject => "Rejected",
-                Action::Revoke => "Revoked",
-            };
-            Ok(JobOutput::Status(format!(
-                "{verb} {}, skipped {}.",
-                count_of(decided.applied, "suggestion"),
-                decided.skipped
-            )))
-        });
-    }
-
     fn create_package(&mut self, ctx: &egui::Context, at: Position) {
         let Some(series) = self.series.clone() else {
             return;
@@ -596,19 +567,13 @@ impl App {
         });
     }
 
-    fn submit(
-        &mut self,
-        ctx: &egui::Context,
-        kind: PromptKind,
-        episodes: Vec<u32>,
-        answer: String,
-    ) {
+    fn submit(&mut self, ctx: &egui::Context, kind: PromptKind, episode: u32, answer: String) {
         let Some(series) = self.series.clone() else {
             return;
         };
         self.clear_on_success = Some(ClearTarget::Answer(kind));
         self.start(ctx, move || {
-            let count = series.submit_answer(kind, &episodes, &answer)?;
+            let count = series.submit_answer(kind, episode, &answer)?;
             Ok(JobOutput::Status(format!(
                 "The answer gave {}.",
                 count_of(count, "suggestion")
@@ -623,7 +588,7 @@ impl App {
         }
         match self.tab {
             Tab::Sources => self.sources_tab(ui),
-            Tab::Suggestions => self.suggestions_tab(ui),
+            Tab::Data => self.data_tab(ui),
             Tab::Prompts => self.prompts_tab(ui),
             Tab::Package => self.package_tab(ui),
         }
@@ -663,20 +628,9 @@ impl App {
                 close = ui.button("All series").clicked();
             });
         });
-        // The count is the suggestions that wait for a decision. It shows only when the list
-        // can hold them.
-        let waiting = self
-            .rows
-            .iter()
-            .filter(|row| row.status == Status::Pending)
-            .count();
-        let suggestions = match self.filter.status {
-            None | Some(Status::Pending) if waiting > 0 => format!("Suggestions ({waiting})"),
-            _ => "Suggestions".to_string(),
-        };
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Sources, "Sources");
-            ui.selectable_value(&mut self.tab, Tab::Suggestions, suggestions);
+            ui.selectable_value(&mut self.tab, Tab::Data, "Data");
             ui.selectable_value(&mut self.tab, Tab::Prompts, "Prompts");
             ui.selectable_value(&mut self.tab, Tab::Package, "Package");
         });
@@ -737,16 +691,16 @@ impl App {
 /// What the views show, read from the series.
 struct Views {
     saved: Vec<Source>,
-    rows: Vec<SuggestionRow>,
+    data: DataView,
     progress: Vec<EpisodeProgress>,
     speakers_answered: BTreeSet<u32>,
     story_answered: BTreeSet<u32>,
 }
 
-fn load_views(series: &Series, filter: SuggestionFilter) -> Result<Views> {
+fn load_views(series: &Series) -> Result<Views> {
     Ok(Views {
         saved: series.sources()?,
-        rows: series.suggestions(&filter)?,
+        data: series.data()?,
         progress: series.progress()?,
         speakers_answered: series.answered_episodes(PromptKind::Speakers)?,
         story_answered: series.answered_episodes(PromptKind::Story)?,

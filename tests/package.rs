@@ -1,7 +1,7 @@
 mod common;
 
 use anime2ctxdb::{Position, PromptKind, Series};
-use common::{approve_all_pending, series_with_episodes};
+use common::series_with_episodes;
 use tempfile::TempDir;
 
 /// The answer for episode 1. Each `{name}` is the short reference of a line that starts at a time.
@@ -10,16 +10,16 @@ use tempfile::TempDir;
 /// 50 s runs from 25 s to 70 s, and the late fact and the late name end at about 87 s.
 const STORY_ANSWER: &str = r#"{
   "new_entities": [
-    { "ref": "N1", "kind": "place", "name": "教室", "evidence": ["{a}"] },
-    { "ref": "N2", "kind": "character", "name": "未来の名前", "evidence": ["{g}"] }
+    { "kind": "place", "name": "教室", "evidence": ["{a}"] },
+    { "kind": "character", "name": "未来の名前", "evidence": ["{g}"] }
   ],
   "facts": [
-    { "entities": ["N1"], "text": "早い事実", "evidence": ["{c}", "{b}"] },
-    { "entities": ["N2"], "text": "遅い事実", "evidence": ["{c}", "{g}"] }
+    { "entities": ["教室"], "text": "早い事実", "evidence": ["{c}", "{b}"] },
+    { "entities": ["未来の名前"], "text": "遅い事実", "evidence": ["{c}", "{g}"] }
   ],
   "scenes": [
-    { "start": "{a}", "end": "{d}", "place": "N1", "summary": "終わった場面" },
-    { "start": "{e}", "end": "{f}", "place": "N1", "summary": "進行中の場面" }
+    { "start": "{a}", "end": "{d}", "place": "教室", "summary": "終わった場面" },
+    { "start": "{e}", "end": "{f}", "place": "教室", "summary": "進行中の場面" }
   ]
 }"#;
 
@@ -55,16 +55,15 @@ fn story_answer(transcript: &str) -> String {
     })
 }
 
-/// Makes episode 1 with the story answer, and approves it.
+/// Makes episode 1 with the story answer.
 fn story_series(root: &std::path::Path) -> Series {
     let series = series_with_episodes(root, 1);
     let prompt = series
-        .prompt(PromptKind::Story, &[1])
+        .prompt(PromptKind::Story, 1)
         .expect("the prompt is made");
     series
-        .submit_answer(PromptKind::Story, &[1], &story_answer(&prompt.text))
+        .submit_answer(PromptKind::Story, 1, &story_answer(&prompt.text))
         .expect("the answer is submitted");
-    approve_all_pending(&series);
     series
 }
 

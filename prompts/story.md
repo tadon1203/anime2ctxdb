@@ -1,12 +1,12 @@
-Extract information about the story from {{episodes}} of an anime.
+Extract information about the story from {{episode}} of an anime.
 
 Known entities:
 {{entities}}
 
-Known facts before the first episode below:
+Known facts from earlier episodes:
 {{facts}}
 
-Transcript of {{episodes}}. Each line has an ID, an episode, a time, a speaker label, the text, and the speaker ([?] is unknown, [-] is no speaker):
+Transcript of {{episode}}. Each line has an ID, an episode, a time, a speaker label, the text, and the speaker ([?] is unknown, [-] is no speaker):
 {{transcript}}
 
 Tell me:
@@ -16,6 +16,7 @@ Tell me:
 
 Rules:
 - Use only this transcript, not other knowledge of the series.
+- Name an entity exactly as in the list of known entities, or as you give it in the new entities.
 - Write only what a line says or directly shows. Do not guess feelings or intent.
 - Write only new or changed information. Do not repeat a known fact.
 - Write the flow of the story in the scene summaries. Write facts that stay true about characters, relationships, and the world.

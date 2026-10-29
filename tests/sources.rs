@@ -417,8 +417,8 @@ fn remove_keeps_a_source_that_an_answer_uses() {
     series
         .submit_answer(
             PromptKind::Speakers,
-            &[1],
-            r#"{ "new_characters": [{ "ref": "N1", "name": "x", "evidence": ["L1"] }] }"#,
+            1,
+            r#"{ "new_characters": [{ "name": "x", "evidence": ["L1"] }] }"#,
         )
         .expect("the answer is submitted");
     let ids: Vec<SourceId> = saved.iter().map(|record| record.id.clone()).collect();

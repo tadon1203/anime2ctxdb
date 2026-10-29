@@ -40,28 +40,26 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum PromptCommand {
-    /// Prints the prompt for one or more episodes. The prompt is not saved.
+    /// Prints the prompt for one episode. The prompt is not saved.
     Show {
         #[arg(long)]
         kind: KindArg,
 
-        /// The episode numbers, such as 1,2,3.
-        #[arg(long, value_delimiter = ',', required = true)]
-        episodes: Vec<u32>,
+        #[arg(long)]
+        episode: u32,
     },
 }
 
 #[derive(Debug, Subcommand)]
 enum AnswerCommand {
-    /// Saves the answer to the prompt for one or more episodes. The answer is read from FILE, or
-    /// from stdin if FILE is missing.
+    /// Saves the answer to the prompt for one episode. A new answer replaces the old answer of the
+    /// same kind. The answer is read from FILE, or from stdin if FILE is missing.
     Submit {
         #[arg(long)]
         kind: KindArg,
 
-        /// The episode numbers, such as 1,2,3. They must be the ones that the prompt had.
-        #[arg(long, value_delimiter = ',', required = true)]
-        episodes: Vec<u32>,
+        #[arg(long)]
+        episode: u32,
 
         file: Option<PathBuf>,
     },
@@ -100,16 +98,16 @@ fn run() -> Result<()> {
     };
     let series = Series::open(&root.join(&cli.series))?;
     match cli.command {
-        Command::Prompt { command } => prompt(&series, command),
+        Command::Prompt { command } => prompt(&series, &command),
         Command::Answer { command } => answer(&series, command),
         Command::Status => status(&series),
     }
 }
 
-fn prompt(series: &Series, command: PromptCommand) -> Result<()> {
+fn prompt(series: &Series, command: &PromptCommand) -> Result<()> {
     match command {
-        PromptCommand::Show { kind, episodes } => {
-            let prompt = series.prompt(kind.into(), &episodes)?;
+        PromptCommand::Show { kind, episode } => {
+            let prompt = series.prompt((*kind).into(), *episode)?;
             print!("{}", prompt.text);
         }
     }
@@ -120,12 +118,12 @@ fn answer(series: &Series, command: AnswerCommand) -> Result<()> {
     match command {
         AnswerCommand::Submit {
             kind,
-            episodes,
+            episode,
             file,
         } => {
             let text = read_answer(file.as_deref())?;
-            let count = series.submit_answer(kind.into(), &episodes, &text)?;
-            println!("saved {count} suggestions");
+            let count = series.submit_answer(kind.into(), episode, &text)?;
+            println!("saved {count} entries");
         }
     }
     Ok(())

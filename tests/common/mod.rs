@@ -1,4 +1,4 @@
-use anime2ctxdb::{Action, Series, Status, SuggestionFilter, SuggestionId};
+use anime2ctxdb::Series;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -20,24 +20,4 @@ pub fn series_with_episodes(root: &Path, count: u32) -> Series {
         series.add_sources(&records).expect("the sources are added");
     }
     series
-}
-
-/// Approves every pending suggestion in the order that the list shows them.
-pub fn approve_all_pending(series: &Series) {
-    let pending: Vec<SuggestionId> = series
-        .suggestions(&SuggestionFilter {
-            status: Some(Status::Pending),
-            kind: None,
-        })
-        .expect("the suggestions load")
-        .into_iter()
-        .map(|row| row.id)
-        .collect();
-    let decided = series
-        .decide(&pending, Action::Approve)
-        .expect("the decisions are made");
-    assert_eq!(
-        decided.skipped, 0,
-        "every pending suggestion can be approved"
-    );
 }
