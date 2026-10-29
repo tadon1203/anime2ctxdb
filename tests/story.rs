@@ -1,6 +1,6 @@
 mod common;
 
-use anime2ctxdb::PromptKind;
+use anime2ctxdb::{Importance, PromptKind, Series};
 use common::series_with_episodes;
 use tempfile::TempDir;
 
@@ -130,4 +130,137 @@ fn a_fact_without_evidence_writes_no_answer_file() {
 
     assert!(format!("{error:#}").contains("entry 1 of facts has no evidence"));
     assert!(!root.path().join("show/answers/story-1.json").exists());
+}
+
+const TWO_ENTITIES: &str = r#"{
+  "new_entities": [
+    { "kind": "place", "name": "教室", "evidence": ["L1"] },
+    { "kind": "place", "name": "屋上", "importance": "main", "evidence": ["L1"] }
+  ],
+  "facts": [{ "entities": ["教室"], "text": "教室の事実", "evidence": ["L3"] }]
+}"#;
+
+const PROMOTE: &str = r#"{ "importance": [{ "name": "教室", "importance": "main" }] }"#;
+
+fn entity_importance(series: &Series, name: &str) -> (Importance, bool) {
+    let data = series.data().expect("the data loads");
+    let row = data
+        .entities
+        .iter()
+        .find(|entity| entity.name == name)
+        .expect("the entity exists");
+    (row.importance, row.manual)
+}
+
+#[test]
+fn a_prompt_leaves_out_a_minor_entity_that_did_not_appear_in_the_last_episode() {
+    let root = TempDir::new().expect("a temporary directory");
+    let series = series_with_episodes(root.path(), 3);
+    series
+        .submit_answer(PromptKind::Story, 1, TWO_ENTITIES)
+        .expect("the answer is submitted");
+
+    let next = series
+        .prompt(PromptKind::Story, 2)
+        .expect("the prompt is made");
+    let later = series
+        .prompt(PromptKind::Story, 3)
+        .expect("the prompt is made");
+
+    assert!(next.known.contains("教室"), "it appeared in episode 1");
+    assert!(next.text.contains("教室の事実"));
+    assert!(later.known.contains("屋上"), "a main entity stays");
+    assert!(!later.known.contains("教室"), "a minor entity is left out");
+    assert!(!later.text.contains("教室の事実"), "its fact is left out");
+}
+
+#[test]
+fn a_later_answer_can_raise_the_importance_of_an_entity() {
+    let root = TempDir::new().expect("a temporary directory");
+    let series = series_with_episodes(root.path(), 3);
+    series
+        .submit_answer(PromptKind::Story, 1, TWO_ENTITIES)
+        .expect("the answer is submitted");
+
+    series
+        .submit_answer(PromptKind::Story, 2, PROMOTE)
+        .expect("the answer is submitted");
+
+    let later = series
+        .prompt(PromptKind::Story, 3)
+        .expect("the prompt is made");
+    assert!(later.known.contains("教室"));
+    assert_eq!(
+        entity_importance(&series, "教室"),
+        (Importance::Main, false)
+    );
+}
+
+#[test]
+fn a_hand_setting_wins_over_the_answers_and_auto_removes_it() {
+    let root = TempDir::new().expect("a temporary directory");
+    let series = series_with_episodes(root.path(), 3);
+    series
+        .submit_answer(PromptKind::Story, 1, TWO_ENTITIES)
+        .expect("the answer is submitted");
+    series
+        .submit_answer(PromptKind::Story, 2, PROMOTE)
+        .expect("the answer is submitted");
+
+    series
+        .set_importance("教室", Some(Importance::Minor))
+        .expect("the importance is set");
+
+    assert_eq!(
+        entity_importance(&series, "教室"),
+        (Importance::Minor, true)
+    );
+    assert!(root.path().join("show/importance.json").exists());
+    let later = series
+        .prompt(PromptKind::Story, 3)
+        .expect("the prompt is made");
+    assert!(!later.known.contains("教室"));
+
+    series
+        .set_importance("教室", None)
+        .expect("the setting is removed");
+
+    assert_eq!(
+        entity_importance(&series, "教室"),
+        (Importance::Main, false)
+    );
+}
+
+#[test]
+fn a_hand_setting_needs_an_entity() {
+    let root = TempDir::new().expect("a temporary directory");
+    let series = series_with_episodes(root.path(), 1);
+
+    let error = series
+        .set_importance("誰か", Some(Importance::Main))
+        .expect_err("no answer introduces the entity");
+
+    assert!(format!("{error:#}").contains("unknown entity 誰か"));
+    assert!(!root.path().join("show/importance.json").exists());
+}
+
+#[test]
+fn a_scene_runs_to_the_start_of_the_next_scene() {
+    let root = TempDir::new().expect("a temporary directory");
+    let series = series_with_episodes(root.path(), 1);
+
+    series
+        .submit_answer(
+            PromptKind::Story,
+            1,
+            r#"{ "scenes": [{ "from": "L1", "summary": "一" }, { "from": "L5", "summary": "二" }] }"#,
+        )
+        .expect("the answer is submitted");
+
+    let scenes = series.data().expect("the data loads").scenes;
+    assert_eq!(scenes[0].end_ms, scenes[1].start_ms);
+    assert!(
+        scenes[1].end_ms > scenes[1].start_ms,
+        "the last scene runs on"
+    );
 }

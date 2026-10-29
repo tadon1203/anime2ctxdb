@@ -1,8 +1,9 @@
 use super::{
-    AnswerError, Prompt, PromptKind, PromptLine, entity_list, entity_name, evidence_of, line_ref,
-    list_or_none, transcript,
+    AnswerError, Prompt, PromptKind, PromptLine, entity_list, entity_name, evidence_of,
+    line_number, line_ref, list_or_none, reference, speaker_text,
 };
-use crate::answers::answer::{Answer, Fact, NewEntity, Scene};
+use crate::answers::answer::{Answer, Fact, ImportanceChange, NewEntity, Scene};
+use crate::importance::Importance;
 use crate::model::{Entity, Position, format_clock};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -10,9 +11,10 @@ use std::collections::{BTreeMap, BTreeSet};
 const TEMPLATE: &str = include_str!("../../../prompts/story.md");
 
 const FORMAT: &str = r#"{
-  "new_entities": [{ "kind": "place", "name": "...", "reading": "...", "evidence": ["L3"] }],
-  "facts": [{ "entities": ["name", "name"], "text": "...", "evidence": ["L12", "L15"] }],
-  "scenes": [{ "start": "L1", "end": "L40", "place": "name", "summary": "..." }]
+  "new_entities": [{ "kind": "place", "name": "...", "reading": "...", "importance": "minor", "evidence": ["L3"] }],
+  "importance": [{ "name": "...", "importance": "main" }],
+  "facts": [{ "entities": ["name", "name"], "text": "...", "evidence": ["L12"] }],
+  "scenes": [{ "from": "L1", "place": "name", "summary": "..." }]
 }"#;
 
 /// What a Story prompt needs from the series.
@@ -40,6 +42,8 @@ struct Reply {
     facts: Vec<ReplyFact>,
     #[serde(default)]
     scenes: Vec<ReplyScene>,
+    #[serde(default)]
+    importance: Vec<ReplyImportance>,
 }
 
 #[derive(Deserialize)]
@@ -47,7 +51,14 @@ struct ReplyEntity {
     kind: String,
     name: String,
     reading: Option<String>,
+    importance: Option<Importance>,
     evidence: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct ReplyImportance {
+    name: String,
+    importance: Importance,
 }
 
 #[derive(Deserialize)]
@@ -59,8 +70,7 @@ struct ReplyFact {
 
 #[derive(Deserialize)]
 struct ReplyScene {
-    start: String,
-    end: String,
+    from: String,
     place: Option<String>,
     summary: String,
 }
@@ -92,6 +102,21 @@ pub fn make(episode: u32, input: &StoryInput) -> Prompt {
     }
 }
 
+/// Writes the lines of the episode, for example `L12 [明智あんな] text`.
+fn transcript(lines: &[PromptLine], refs: &mut BTreeMap<String, String>) -> Vec<String> {
+    lines
+        .iter()
+        .map(|line| {
+            format!(
+                "{} {} {}",
+                reference(line, refs),
+                speaker_text(&line.speaker),
+                line.text
+            )
+        })
+        .collect()
+}
+
 /// One known fact, for example `E1 03:50 [明智あんな, 坂本みくる] text`.
 fn fact_text(fact: &PromptFact) -> String {
     format!(
@@ -119,6 +144,15 @@ pub(super) fn parse(prompt: &Prompt, json: &str) -> Result<Answer, AnswerError> 
             kind: entity.kind,
             name: entity.name,
             reading: entity.reading,
+            importance: entity.importance,
+        });
+    }
+
+    let mut importance = Vec::new();
+    for change in reply.importance {
+        importance.push(ImportanceChange {
+            name: entity_name(prompt, &declared, &change.name)?,
+            importance: change.importance,
         });
     }
 
@@ -136,15 +170,16 @@ pub(super) fn parse(prompt: &Prompt, json: &str) -> Result<Answer, AnswerError> 
     }
 
     let mut scenes = Vec::new();
+    let mut previous = 0;
     for (index, scene) in reply.scenes.into_iter().enumerate() {
-        let start = line_ref(prompt, &scene.start)?;
-        let end = line_ref(prompt, &scene.end)?;
-        if line_number(&scene.end) < line_number(&scene.start) {
+        let start = line_ref(prompt, &scene.from)?;
+        let number = line_number(&scene.from);
+        if number <= previous {
             return Err(AnswerError::SceneOrder(index + 1));
         }
+        previous = number;
         scenes.push(Scene {
             start,
-            end,
             place: scene
                 .place
                 .as_deref()
@@ -159,14 +194,8 @@ pub(super) fn parse(prompt: &Prompt, json: &str) -> Result<Answer, AnswerError> 
         entities,
         facts,
         scenes,
+        importance,
     })
-}
-
-/// The number of an `L` reference. Only a reference that `line_ref` accepted comes here.
-fn line_number(reference: &str) -> u32 {
-    reference[1..]
-        .parse()
-        .expect("a line reference has a number")
 }
 
 #[cfg(test)]
@@ -191,7 +220,7 @@ mod tests {
     const ANSWER: &str = r#"{
       "new_entities": [{ "kind": "place", "name": "教室", "evidence": ["L1"] }],
       "facts": [{ "entities": ["坂本みくる", "教室"], "text": "t", "evidence": ["L2", "L3"] }],
-      "scenes": [{ "start": "L1", "end": "L3", "place": "教室", "summary": "s" }]
+      "scenes": [{ "from": "L1", "place": "教室", "summary": "s" }]
     }"#;
 
     fn answer(json: &str) -> Result<Answer, AnswerError> {
@@ -207,6 +236,7 @@ mod tests {
             entities,
             facts,
             scenes,
+            ..
         } = answer
         else {
             panic!("a story answer");
@@ -273,20 +303,58 @@ mod tests {
     }
 
     #[test]
-    fn a_scene_that_ends_before_it_starts_is_an_error() {
+    fn a_scene_that_does_not_start_after_the_previous_one_is_an_error() {
         let error = answer(
-            r#"{ "scenes": [{ "start": "L3", "end": "L1", "place": null, "summary": "s" }] }"#,
+            r#"{ "scenes": [{ "from": "L3", "summary": "s" }, { "from": "L1", "summary": "s" }] }"#,
         )
-        .expect_err("the end is before the start");
+        .expect_err("the second scene starts first");
 
-        assert!(matches!(error, AnswerError::SceneOrder(1)));
+        assert!(matches!(error, AnswerError::SceneOrder(2)));
+    }
+
+    #[test]
+    fn an_entity_can_get_an_importance_when_it_is_new_and_later() {
+        let answer = answer(
+            r#"{
+              "new_entities": [{ "kind": "character", "name": "宇都見", "importance": "recurring", "evidence": ["L1"] }],
+              "importance": [{ "name": "坂本みくる", "importance": "main" }]
+            }"#,
+        )
+        .expect("the answer parses");
+
+        let Answer::Story {
+            entities,
+            importance,
+            ..
+        } = answer
+        else {
+            panic!("a story answer");
+        };
+        assert_eq!(entities[0].importance, Some(Importance::Recurring));
+        assert_eq!(importance[0].name, "坂本みくる");
+        assert_eq!(importance[0].importance, Importance::Main);
+    }
+
+    #[test]
+    fn the_importance_of_an_unknown_entity_is_an_error() {
+        let error = answer(r#"{ "importance": [{ "name": "誰か", "importance": "main" }] }"#)
+            .expect_err("the name is unknown");
+
+        assert!(matches!(error, AnswerError::UnknownEntity(name) if name == "誰か"));
+    }
+
+    #[test]
+    fn a_wrong_importance_is_an_error() {
+        let error = answer(r#"{ "importance": [{ "name": "職員室", "importance": "huge" }] }"#)
+            .expect_err("the value is wrong");
+
+        assert!(matches!(error, AnswerError::InvalidJson(_)));
     }
 
     #[test]
     fn make_writes_the_transcript_with_references() {
         let line = |id: &str| PromptLine {
             id: LineId(id.to_string()),
-            episode: 2,
             start_ms: 1_000,
             color: None,
             label: None,
@@ -303,7 +371,7 @@ mod tests {
 
         assert_eq!(prompt.episode, 2);
         assert!(prompt.text.contains("episode 2"));
-        assert!(prompt.text.contains("L1 E2 00:01 t [?]"));
+        assert!(prompt.text.contains("L1 [?] t"));
         assert_eq!(prompt.refs["L2"], "s:1");
     }
 

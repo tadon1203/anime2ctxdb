@@ -7,6 +7,7 @@ use index::Index;
 use crate::answers::answer;
 use crate::answers::prompt::{self, Prompt, PromptKind};
 use crate::files::write_atomic;
+use crate::importance::{self, Importance};
 use crate::model::Position;
 use crate::package;
 use crate::sources::{self, Problem, Scan, Source, SourceId};
@@ -190,6 +191,27 @@ impl Series {
     pub fn data(&self) -> Result<DataView> {
         let index = Index::open(&self.dir)?;
         index.data()
+    }
+
+    /// Sets the importance of an entity by hand. A hand setting wins over every answer. `None`
+    /// removes the hand setting. An entity that no answer introduces cannot get a setting.
+    pub fn set_importance(&self, name: &str, importance: Option<Importance>) -> Result<()> {
+        let _lock = write_lock(&self.dir)?;
+        let mut overrides = importance::load_overrides(&self.dir)?;
+        match importance {
+            Some(value) => {
+                ensure!(
+                    Index::open(&self.dir)?.has_entity(name)?,
+                    "unknown entity {name}"
+                );
+                overrides.insert(name.to_string(), value);
+            }
+            None => {
+                overrides.remove(name);
+            }
+        }
+        importance::save_overrides(&self.dir, &overrides)?;
+        Index::rebuild(&self.dir)
     }
 
     /// Makes the context package at one position, as YAML text. Nothing is saved.

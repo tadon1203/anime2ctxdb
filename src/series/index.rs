@@ -1,19 +1,23 @@
 use crate::answers::answer::{self, Answer};
 use crate::answers::prompt::{PromptFact, PromptKind, PromptLine, SpeakersInput, StoryInput};
 use crate::files::{enum_from_text, enum_text};
+use crate::importance::{self, Declaration, Importance, Importances};
 use crate::model::{CHARACTER, Entity, EntityId, Position, format_clock};
-use crate::package::{PackageFact, PackageInput, PackageLine, PackageScene};
+use crate::package::{PackageFact, PackageInput, PackageLine, PackageSample, PackageScene};
 use crate::sources::ass::{self, LineId};
 use crate::sources::{self, Language, Source, SourceId, SourceKind};
 use crate::speakers::{self, Label, Speaker, SpeakerMethod};
 use anyhow::{Context, Result, anyhow, bail};
-use rusqlite::{Connection, OpenFlags, Row, Transaction, params};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use rusqlite::{Connection, OpenFlags, Transaction, params};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The version of the tables in `schema.sql`. A different version means a full rebuild.
-pub const SCHEMA_VERSION: i32 = 5;
+pub const SCHEMA_VERSION: i32 = 6;
+
+/// How many sample lines of each character the package gets.
+const SAMPLE_LINES: u32 = 5;
 
 const SCHEMA: &str = include_str!("schema.sql");
 
@@ -35,6 +39,10 @@ pub struct EntityRow {
     pub kind: String,
     pub reading: Option<String>,
     pub since: Position,
+    /// The importance after the last episode.
+    pub importance: Importance,
+    /// True: the user set the importance by hand.
+    pub manual: bool,
 }
 
 /// A fact, as the Data view shows it.
@@ -87,6 +95,8 @@ struct Data {
     lines: Vec<EpisodeLine>,
     /// In order: by episode, and then speakers before story.
     answers: Vec<Answer>,
+    /// The importance that the user set by hand.
+    overrides: BTreeMap<String, Importance>,
 }
 
 /// The labels, colors, and line speakers that the answers set. A later episode wins.
@@ -186,12 +196,19 @@ fn load(series_dir: &Path, skip: Option<(PromptKind, u32)>) -> Result<Data> {
         records,
         lines,
         answers,
+        overrides: importance::load_overrides(series_dir)?,
     })
 }
 
 fn write_all(transaction: &Transaction<'_>, data: &Data) -> Result<()> {
     insert_sources(transaction, &data.records)?;
     insert_lines(transaction, &data.lines)?;
+    for (name, value) in &data.overrides {
+        transaction.execute(
+            "INSERT INTO importance_overrides VALUES (?1, ?2)",
+            params![name, enum_text(value)],
+        )?;
+    }
 
     let line_index: HashMap<&LineId, LineTime> = data
         .lines
@@ -268,6 +285,9 @@ fn insert_entities(
             Answer::Story { entities, .. } => entities,
         };
         for entity in introduced {
+            if let Some(value) = entity.importance {
+                insert_declaration(transaction, &entity.name, answer.episode(), value)?;
+            }
             let since = since_of(entity.evidence.lines(), line_index, answer)?;
             match merged.get_mut(entity.name.as_str()) {
                 Some(old) => {
@@ -287,6 +307,16 @@ fn insert_entities(
                 }
             }
         }
+        if let Answer::Story { importance, .. } = answer {
+            for change in importance {
+                insert_declaration(
+                    transaction,
+                    &change.name,
+                    answer.episode(),
+                    change.importance,
+                )?;
+            }
+        }
     }
     for (name, entity) in merged {
         transaction.execute(
@@ -303,12 +333,30 @@ fn insert_entities(
     Ok(())
 }
 
+fn insert_declaration(
+    transaction: &Transaction<'_>,
+    name: &str,
+    episode: u32,
+    importance: Importance,
+) -> Result<()> {
+    transaction.execute(
+        "INSERT INTO importance_declarations VALUES (?1, ?2, ?3)",
+        params![name, episode, enum_text(&importance)],
+    )?;
+    Ok(())
+}
+
 /// Writes the facts and the scenes of the story answers.
 fn insert_story(
     transaction: &Transaction<'_>,
     answers: &[Answer],
     line_index: &HashMap<&LineId, LineTime>,
 ) -> Result<()> {
+    let mut episode_ends: HashMap<u32, u32> = HashMap::new();
+    for time in line_index.values() {
+        let end = episode_ends.entry(time.episode).or_insert(0);
+        *end = (*end).max(time.end_ms);
+    }
     for answer in answers {
         let Answer::Story { facts, scenes, .. } = answer else {
             continue;
@@ -334,16 +382,24 @@ fn insert_story(
                 )?;
             }
         }
+        // A scene runs to the start of the next scene, and the last one to the end of the episode.
+        let starts = scenes
+            .iter()
+            .map(|scene| line_time(answer, &scene.start, line_index))
+            .collect::<Result<Vec<LineTime>>>()?;
         for (number, scene) in scenes.iter().enumerate() {
-            let start = line_time(answer, &scene.start, line_index)?;
-            let end = line_time(answer, &scene.end, line_index)?;
+            let start = starts[number];
+            let end_ms = match starts.get(number + 1) {
+                Some(next) => next.start_ms,
+                None => episode_ends[&start.episode],
+            };
             transaction.execute(
                 "INSERT INTO scenes VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     format!("{name}-scene-{}", number + 1),
                     start.episode,
                     start.start_ms,
-                    end.end_ms,
+                    end_ms.max(start.start_ms),
                     scene.place,
                     scene.summary
                 ],
@@ -575,6 +631,7 @@ impl Index {
 
     /// The entities, the facts, and the scenes that the answers gave, in story order.
     pub fn data(&self) -> Result<DataView> {
+        let importances = load_importances(&self.connection)?;
         let entities = self
             .connection
             .prepare(
@@ -582,8 +639,11 @@ impl Index {
                  ORDER BY since_episode, since_ms, name",
             )?
             .query_map([], |row| {
+                let name: String = row.get(0)?;
                 Ok(EntityRow {
-                    name: row.get(0)?,
+                    importance: importances.of(&name, u32::MAX),
+                    manual: importances.manual(&name).is_some(),
+                    name,
                     kind: row.get(1)?,
                     reading: row.get(2)?,
                     since: Position {
@@ -658,6 +718,15 @@ impl Index {
         })
     }
 
+    /// True when an answer introduces an entity with this name.
+    pub fn has_entity(&self, name: &str) -> Result<bool> {
+        Ok(self.connection.query_row(
+            "SELECT COUNT(*) > 0 FROM entities WHERE name = ?1",
+            params![name],
+            |row| row.get(0),
+        )?)
+    }
+
     /// One line of evidence, for example `E1 00:10 わたし 持つ！`.
     pub fn evidence_text(&self, line: &LineId) -> Result<String> {
         let row = self.connection.query_row(
@@ -685,33 +754,48 @@ impl Index {
         require_subtitle(&self.connection, episode)?;
         Ok(SpeakersInput {
             lines: self.episode_lines(episode)?,
-            entities: entities(&self.connection, Some(CHARACTER), episode)?,
+            entities: prompt_entities(&self.connection, Some(CHARACTER), episode)?,
             labels: unmapped_labels(&self.connection, episode)?,
             colors: unmapped_colors(&self.connection, episode)?,
         })
     }
 
     /// The input of a Story prompt. It fails when an episode has no `Ja` subtitle. The known
-    /// entities are the ones known by the end of the episode. The known facts are the facts
-    /// before the episode.
+    /// entities are the ones that `prompt_entities` lists. The known facts are the facts before the
+    /// episode that have no entity, or an entity that the prompt lists.
     pub fn story_input(&self, episode: u32) -> Result<StoryInput> {
         require_subtitle(&self.connection, episode)?;
+        let entities = prompt_entities(&self.connection, None, episode)?;
+        let listed: HashSet<&str> = entities.iter().map(|entity| entity.name.as_str()).collect();
+        let facts = known_facts(&self.connection, episode)?
+            .into_iter()
+            .filter(|fact| {
+                fact.entities.is_empty()
+                    || fact
+                        .entities
+                        .iter()
+                        .any(|name| listed.contains(name.as_str()))
+            })
+            .collect();
         Ok(StoryInput {
             lines: self.episode_lines(episode)?,
-            entities: entities(&self.connection, None, episode)?,
-            facts: known_facts(&self.connection, episode)?,
+            entities,
+            facts,
         })
     }
 
     /// The input of a context package at one position. It fails when the episode has no `Ja` subtitle.
     pub fn package_input(&self, at: Position) -> Result<PackageInput> {
         require_subtitle(&self.connection, at.episode)?;
+        let entities = known_entities(&self.connection, at)?;
+        let samples = package_samples(&self.connection, at, &entities)?;
         Ok(PackageInput {
             at,
-            entities: known_entities(&self.connection, at)?,
+            entities,
             facts: package_facts(&self.connection, at)?,
             scenes: package_scenes(&self.connection, at)?,
             lines: package_lines(&self.connection, at)?,
+            samples,
         })
     }
 
@@ -736,7 +820,6 @@ impl Index {
                 let speaker = speakers.get(&id).cloned().unwrap_or(Speaker::Unknown);
                 Ok(PromptLine {
                     id: LineId(id),
-                    episode,
                     start_ms,
                     color,
                     label,
@@ -802,41 +885,152 @@ fn speakers_of_episode(connection: &Connection, episode: u32) -> Result<HashMap<
     Ok(speakers)
 }
 
-/// The entities that are known by the end of the episode, in the order they were added. `kind`
-/// `None` gives all kinds. A later entity is left out.
-fn entities(connection: &Connection, kind: Option<&str>, episode: u32) -> Result<Vec<Entity>> {
+/// The declarations of the answers and the hand settings.
+fn load_importances(connection: &Connection) -> Result<Importances> {
+    let declarations = connection
+        .prepare("SELECT name, episode, importance FROM importance_declarations ORDER BY rowid")?
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u32>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
+        .map(|(name, episode, importance)| {
+            Ok(Declaration {
+                name,
+                episode,
+                importance: enum_from_text(&importance)?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let overrides = connection
+        .prepare("SELECT name, importance FROM importance_overrides")?
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
+        .map(|(name, importance)| Ok((name, enum_from_text(&importance)?)))
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    Ok(Importances::new(declarations, overrides))
+}
+
+/// Makes the entities of the rows. An entity is its name, so the name is also its ID. The
+/// importance is the one at `up_to_episode`.
+fn entities_of_rows(
+    rows: Vec<(String, String, Option<String>)>,
+    importances: &Importances,
+    up_to_episode: u32,
+) -> Vec<Entity> {
+    rows.into_iter()
+        .map(|(name, kind, reading)| Entity {
+            id: EntityId(name.clone()),
+            kind,
+            reading,
+            importance: importances.of(&name, up_to_episode),
+            name,
+        })
+        .collect()
+}
+
+/// The entities that a prompt for the episode lists, in the order they were added. `kind` `None`
+/// gives all kinds. An entity must be known by the end of the episode. A `main` or `recurring`
+/// entity is always listed. A `minor` entity is listed only when it appeared in the last episode.
+fn prompt_entities(
+    connection: &Connection,
+    kind: Option<&str>,
+    episode: u32,
+) -> Result<Vec<Entity>> {
+    let importances = load_importances(connection)?;
+    let appeared = appeared_before(connection, episode)?;
+    let rows = connection
+        .prepare(
+            "SELECT name, kind, reading FROM entities
+             WHERE (?1 IS NULL OR kind = ?1) AND since_episode <= ?2
+             ORDER BY since_episode, since_ms, name",
+        )?
+        .query_map(params![kind, episode], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(entities_of_rows(rows, &importances, episode)
+        .into_iter()
+        .filter(|entity| {
+            entity.importance != Importance::Minor || appeared.contains(entity.name.as_str())
+        })
+        .collect())
+}
+
+/// The names of the entities that appeared in the episode before `episode`, or later: the entity
+/// became known, a fact has it, a scene has it as place, or it speaks in a line.
+fn appeared_before(connection: &Connection, episode: u32) -> Result<HashSet<String>> {
     let mut statement = connection.prepare(
-        "SELECT name, kind, reading FROM entities
-         WHERE (?1 IS NULL OR kind = ?1) AND since_episode <= ?2
-         ORDER BY since_episode, since_ms, name",
+        "SELECT name FROM entities WHERE since_episode + 1 >= ?1
+         UNION SELECT e.entity_id FROM fact_entities e JOIN facts f ON f.id = e.fact_id
+               WHERE f.since_episode + 1 = ?1
+         UNION SELECT place_id FROM scenes WHERE episode + 1 = ?1 AND place_id IS NOT NULL
+         UNION SELECT s.entity_id FROM line_speakers s JOIN lines l ON l.id = s.line_id
+               WHERE l.episode + 1 = ?1 AND s.entity_id IS NOT NULL",
     )?;
-    let entities = statement
-        .query_map(params![kind, episode], entity_from_row)?
+    let names = statement
+        .query_map(params![episode], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<_>>()?;
-    Ok(entities)
+    Ok(names)
 }
 
-/// An entity is its name, so the name is also its ID.
-fn entity_from_row(row: &Row<'_>) -> rusqlite::Result<Entity> {
-    let name: String = row.get(0)?;
-    Ok(Entity {
-        id: EntityId(name.clone()),
-        kind: row.get(1)?,
-        name,
-        reading: row.get(2)?,
-    })
-}
-
-/// The entities that are known at the position. A later entity is left out.
+/// The entities that are known at the position. A later entity is left out. The importance is
+/// the one at the episode of the position.
 fn known_entities(connection: &Connection, at: Position) -> Result<Vec<Entity>> {
+    let importances = load_importances(connection)?;
+    let rows = connection
+        .prepare(
+            "SELECT name, kind, reading FROM entities
+             WHERE (since_episode, since_ms) <= (?1, ?2) ORDER BY since_episode, since_ms, name",
+        )?
+        .query_map(params![at.episode, at.time_ms], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(entities_of_rows(rows, &importances, at.episode))
+}
+
+/// The last lines of each character that are known at the position, oldest first. The lines have a
+/// speaker from a label, a color, or an AI answer.
+fn package_samples(
+    connection: &Connection,
+    at: Position,
+    entities: &[Entity],
+) -> Result<Vec<PackageSample>> {
     let mut statement = connection.prepare(
-        "SELECT name, kind, reading FROM entities
-         WHERE (since_episode, since_ms) <= (?1, ?2) ORDER BY since_episode, since_ms, name",
+        "SELECT l.id FROM line_speakers s JOIN lines l ON l.id = s.line_id
+         WHERE s.entity_id = ?1 AND s.method IN ('label', 'color', 'ai')
+           AND (l.episode < ?2 OR (l.episode = ?2 AND l.end_ms <= ?3))
+         ORDER BY l.episode DESC, l.start_ms DESC LIMIT ?4",
     )?;
-    let entities = statement
-        .query_map(params![at.episode, at.time_ms], entity_from_row)?
-        .collect::<rusqlite::Result<_>>()?;
-    Ok(entities)
+    let mut samples = Vec::new();
+    for entity in entities.iter().filter(|entity| entity.kind == CHARACTER) {
+        let ids = statement
+            .query_map(
+                params![entity.name, at.episode, at.time_ms, SAMPLE_LINES],
+                |row| row.get::<_, String>(0),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let lines = ids
+            .iter()
+            .rev()
+            .map(|id| package_line(connection, id))
+            .collect::<Result<Vec<_>>>()?;
+        if !lines.is_empty() {
+            samples.push(PackageSample {
+                character: entity.id.clone(),
+                lines,
+            });
+        }
+    }
+    Ok(samples)
 }
 
 /// The facts that are known at the position, with their lines.

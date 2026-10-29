@@ -1,22 +1,23 @@
 use super::{
-    AnswerError, Prompt, PromptKind, PromptLine, entity_list, entity_name, evidence_of, line_ref,
-    list_or_none, transcript,
+    AnswerError, Prompt, PromptKind, PromptLine, entity_list, entity_name, evidence_of,
+    line_number, line_ref, list_or_none, reference, speaker_text,
 };
 use crate::answers::answer::{Answer, ColorEntry, LabelEntry, LineEntry, NewEntity};
-use crate::model::{CHARACTER, Entity};
-use crate::speakers::LabelKind;
+use crate::importance::Importance;
+use crate::model::{CHARACTER, Entity, format_clock};
+use crate::speakers::{LabelKind, Speaker};
 use serde::{Deserialize, Deserializer};
 use std::collections::{BTreeMap, BTreeSet};
 
 const TEMPLATE: &str = include_str!("../../../prompts/speakers.md");
 
 const FORMAT: &str = r##"{
-  "new_characters": [{ "name": "...", "reading": "...", "evidence": ["L4"] }],
+  "new_characters": [{ "name": "...", "reading": "...", "importance": "minor", "evidence": ["L4"] }],
   "labels": [{ "label": "...", "kind": "character", "character": "name" },
              { "label": "...", "kind": "sound" }],
   "colors": [{ "color": "#FFFF00", "character": "name" }],
-  "lines": [{ "line": "L88", "characters": ["name"] },
-            { "line": "L90", "characters": [] }]
+  "lines": [{ "from": "L88", "to": "L92", "characters": ["name"] },
+            { "from": "L95", "characters": [] }]
 }"##;
 
 /// What a Speakers prompt needs from the series.
@@ -46,6 +47,7 @@ struct Reply {
 struct ReplyCharacter {
     name: String,
     reading: Option<String>,
+    importance: Option<Importance>,
     evidence: Vec<String>,
 }
 
@@ -65,7 +67,8 @@ struct ReplyColor {
 
 #[derive(Deserialize)]
 struct ReplyLine {
-    line: String,
+    from: String,
+    to: Option<String>,
     characters: Vec<String>,
 }
 
@@ -77,6 +80,32 @@ fn parse_color<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Err
         .ok_or_else(|| serde::de::Error::custom(format!("invalid color {text}")))?;
     u32::from_str_radix(hex, 16)
         .map_err(|_| serde::de::Error::custom(format!("invalid color {text}")))
+}
+
+/// Writes the lines of the episode, for example `L12 01:01 #FFFF00 （あんな） text [明智あんな]`.
+///
+/// A line that has a label or a color, and no speaker yet, has no speaker mark. The `labels` and
+/// the `colors` of the answer give its speaker. `[?]` means that the answer must say the speaker.
+fn transcript(lines: &[PromptLine], refs: &mut BTreeMap<String, String>) -> Vec<String> {
+    lines
+        .iter()
+        .map(|line| {
+            let mut parts = vec![reference(line, refs), format_clock(line.start_ms)];
+            if let Some(color) = line.color {
+                parts.push(format!("#{color:06X}"));
+            }
+            if let Some(label) = &line.label {
+                parts.push(format!("（{label}）"));
+            }
+            parts.push(line.text.clone());
+            let solved_by_answer =
+                line.speaker == Speaker::Unknown && (line.label.is_some() || line.color.is_some());
+            if !solved_by_answer {
+                parts.push(speaker_text(&line.speaker));
+            }
+            parts.join(" ")
+        })
+        .collect()
 }
 
 /// Builds a Speakers prompt for one episode. The short references are `L1` for lines, in order.
@@ -128,6 +157,7 @@ pub(super) fn parse(prompt: &Prompt, json: &str) -> Result<Answer, AnswerError> 
             evidence: evidence_of(prompt, "new_characters", index, &character.evidence)?,
             name: character.name,
             reading: character.reading,
+            importance: character.importance,
         });
     }
 
@@ -154,15 +184,34 @@ pub(super) fn parse(prompt: &Prompt, json: &str) -> Result<Answer, AnswerError> 
     }
 
     let mut lines = Vec::new();
-    for line in reply.lines {
-        lines.push(LineEntry {
-            line: line_ref(prompt, &line.line)?,
-            characters: line
-                .characters
-                .iter()
-                .map(|name| entity_name(prompt, &declared, name))
-                .collect::<Result<Vec<String>, _>>()?,
-        });
+    for (index, range) in reply.lines.into_iter().enumerate() {
+        let characters = range
+            .characters
+            .iter()
+            .map(|name| entity_name(prompt, &declared, name))
+            .collect::<Result<Vec<String>, _>>()?;
+        let first = line_ref(prompt, &range.from)?;
+        let (first_number, last_number) = match &range.to {
+            Some(to) => {
+                line_ref(prompt, to)?;
+                (line_number(&range.from), line_number(to))
+            }
+            None => (line_number(&range.from), line_number(&range.from)),
+        };
+        if last_number < first_number {
+            return Err(AnswerError::LineRange(index + 1));
+        }
+        for number in first_number..=last_number {
+            let line = if number == first_number {
+                first.clone()
+            } else {
+                line_ref(prompt, &format!("L{number}"))?
+            };
+            lines.push(LineEntry {
+                line,
+                characters: characters.clone(),
+            });
+        }
     }
 
     Ok(Answer::Speakers {
@@ -199,7 +248,7 @@ mod tests {
       "new_characters": [{ "name": "明智あんな", "evidence": ["L1"] }],
       "labels": [{ "label": "あんな", "kind": "character", "character": "明智あんな" }],
       "colors": [{ "color": "#FFFF00", "character": "坂本みくる" }],
-      "lines": [{ "line": "L2", "characters": ["明智あんな"] }]
+      "lines": [{ "from": "L2", "characters": ["明智あんな"] }]
     }"##;
 
     fn parse_text(text: &str) -> Result<Answer, AnswerError> {
@@ -242,15 +291,38 @@ mod tests {
 
     #[test]
     fn an_unknown_line_is_an_error() {
-        let error = parse_text(r#"{ "lines": [{ "line": "L9", "characters": [] }] }"#)
+        let error = parse_text(r#"{ "lines": [{ "from": "L9", "characters": [] }] }"#)
             .expect_err("L9 is unknown");
 
         assert!(matches!(error, AnswerError::UnknownRef(reference) if reference == "L9"));
     }
 
     #[test]
+    fn a_range_gives_every_line_in_it_the_same_speakers() {
+        let answer = parse_text(
+            r#"{ "lines": [{ "from": "L1", "to": "L2", "characters": ["坂本みくる"] }] }"#,
+        )
+        .expect("the answer parses");
+
+        let Answer::Speakers { lines, .. } = answer else {
+            panic!("a speakers answer");
+        };
+        let ids: Vec<&str> = lines.iter().map(|entry| entry.line.0.as_str()).collect();
+        assert_eq!(ids, ["s:0", "s:1"]);
+        assert!(lines.iter().all(|entry| entry.characters == ["坂本みくる"]));
+    }
+
+    #[test]
+    fn a_range_that_ends_before_it_starts_is_an_error() {
+        let error = parse_text(r#"{ "lines": [{ "from": "L2", "to": "L1", "characters": [] }] }"#)
+            .expect_err("the range is backwards");
+
+        assert!(matches!(error, AnswerError::LineRange(1)));
+    }
+
+    #[test]
     fn an_unknown_character_is_an_error() {
-        let error = parse_text(r#"{ "lines": [{ "line": "L2", "characters": ["誰か"] }] }"#)
+        let error = parse_text(r#"{ "lines": [{ "from": "L2", "characters": ["誰か"] }] }"#)
             .expect_err("the name is unknown");
 
         assert!(matches!(error, AnswerError::UnknownEntity(name) if name == "誰か"));
@@ -282,7 +354,6 @@ mod tests {
         let input = SpeakersInput {
             lines: vec![PromptLine {
                 id: LineId("s:0".to_string()),
-                episode: 1,
                 start_ms: 61_000,
                 color: Some(0x00FF_FF00),
                 label: Some("あんな".to_string()),
@@ -297,6 +368,7 @@ mod tests {
                 kind: CHARACTER.to_string(),
                 name: "明智あんな".to_string(),
                 reading: None,
+                importance: Importance::Main,
             }],
             labels: vec![],
             colors: vec![],
@@ -307,9 +379,37 @@ mod tests {
         assert!(
             prompt
                 .text
-                .contains("L1 E1 01:01 #FFFF00 （あんな） わたし [明智あんな]")
+                .contains("L1 01:01 #FFFF00 （あんな） わたし [明智あんな]")
         );
         assert_eq!(prompt.refs["L1"], "s:0");
         assert!(prompt.known.contains("明智あんな"));
+    }
+
+    #[test]
+    fn only_a_line_with_no_label_and_no_color_asks_for_a_speaker() {
+        let line = |label: Option<&str>, color: Option<u32>| PromptLine {
+            id: LineId("s:0".to_string()),
+            start_ms: 0,
+            color,
+            label: label.map(str::to_string),
+            text: "t".to_string(),
+            speaker: Speaker::Unknown,
+        };
+        let input = SpeakersInput {
+            lines: vec![
+                line(None, None),
+                line(Some("あんな"), None),
+                line(None, Some(0x00FF_FF00)),
+            ],
+            entities: vec![],
+            labels: vec![],
+            colors: vec![],
+        };
+
+        let prompt = make(1, &input);
+
+        assert!(prompt.text.contains("L1 00:00 t [?]"));
+        assert!(prompt.text.contains("L2 00:00 （あんな） t\n"));
+        assert!(prompt.text.contains("L3 00:00 #FFFF00 t\n"));
     }
 }

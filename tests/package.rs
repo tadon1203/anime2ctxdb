@@ -1,37 +1,37 @@
 mod common;
 
-use anime2ctxdb::{Position, PromptKind, Series};
+use anime2ctxdb::{Importance, Position, PromptKind, Series};
 use common::series_with_episodes;
 use tempfile::TempDir;
 
 /// The answer for episode 1. Each `{name}` is the short reference of a line that starts at a time.
 ///
 /// Times, from the sample: the early fact ends at about 13 s, the scene that is in progress at
-/// 50 s runs from 25 s to 70 s, and the late fact and the late name end at about 87 s.
+/// 50 s starts at 25 s and runs to the end of the episode, and the late fact and the late name end
+/// at about 87 s.
 const STORY_ANSWER: &str = r#"{
   "new_entities": [
-    { "kind": "place", "name": "教室", "evidence": ["{a}"] },
-    { "kind": "character", "name": "未来の名前", "evidence": ["{g}"] }
+    { "kind": "place", "name": "教室", "importance": "main", "evidence": ["{a}"] },
+    { "kind": "character", "name": "未来の名前", "importance": "main", "evidence": ["{g}"] }
   ],
   "facts": [
     { "entities": ["教室"], "text": "早い事実", "evidence": ["{c}", "{b}"] },
     { "entities": ["未来の名前"], "text": "遅い事実", "evidence": ["{c}", "{g}"] }
   ],
   "scenes": [
-    { "start": "{a}", "end": "{d}", "place": "教室", "summary": "終わった場面" },
-    { "start": "{e}", "end": "{f}", "place": "教室", "summary": "進行中の場面" }
+    { "from": "{a}", "place": "教室", "summary": "終わった場面" },
+    { "from": "{e}", "place": "教室", "summary": "進行中の場面" }
   ]
 }"#;
 
 /// The short reference of the first line of the transcript that starts at or after `clock`.
-/// A transcript line has the form `L1 00:00 text`.
+/// A speakers transcript line has the form `L1 00:00 text`.
 fn line_from(transcript: &str, clock: &str) -> String {
     transcript
         .lines()
         .find_map(|line| {
             let mut parts = line.split(' ');
             let reference = parts.next()?;
-            let _episode = parts.next()?;
             let time = parts.next()?;
             (reference.starts_with('L') && time >= clock).then(|| reference.to_string())
         })
@@ -44,9 +44,7 @@ fn story_answer(transcript: &str) -> String {
         ("a", "00:00"),
         ("b", "00:10"),
         ("c", "00:02"),
-        ("d", "00:20"),
         ("e", "00:25"),
-        ("f", "01:05"),
         ("g", "01:25"),
     ]
     .iter()
@@ -55,14 +53,21 @@ fn story_answer(transcript: &str) -> String {
     })
 }
 
+/// The line references have the same numbers in every prompt of an episode. Only the speakers
+/// prompt has the times.
+fn times_of(series: &Series) -> String {
+    series
+        .prompt(PromptKind::Speakers, 1)
+        .expect("the prompt is made")
+        .text
+}
+
 /// Makes episode 1 with the story answer.
 fn story_series(root: &std::path::Path) -> Series {
     let series = series_with_episodes(root, 1);
-    let prompt = series
-        .prompt(PromptKind::Story, 1)
-        .expect("the prompt is made");
+    let times = times_of(&series);
     series
-        .submit_answer(PromptKind::Story, 1, &story_answer(&prompt.text))
+        .submit_answer(PromptKind::Story, 1, &story_answer(&times))
         .expect("the answer is submitted");
     series
 }
@@ -117,7 +122,7 @@ fn a_scene_and_a_fact_appear_after_their_end_or_since() {
     let root = TempDir::new().expect("a temporary directory");
     let series = story_series(root.path());
 
-    let text = package_at(&series, 1, 120_000);
+    let text = package_at(&series, 1, 1_500_000);
 
     assert!(
         text.contains("進行中の場面"),
@@ -152,4 +157,70 @@ fn an_episode_without_a_ja_subtitle_is_an_error() {
         .expect_err("episode 9 has no subtitle");
 
     assert!(format!("{error:#}").contains("no Ja subtitle"));
+}
+
+/// An answer with a minor entity and a fact about it, known at about 13 s.
+fn minor_series(root: &std::path::Path) -> Series {
+    let series = series_with_episodes(root, 1);
+    let times = times_of(&series);
+    let b = line_from(&times, "00:10");
+    let answer = format!(
+        r#"{{
+          "new_entities": [{{ "kind": "object", "name": "ティアラ", "evidence": ["{b}"] }}],
+          "facts": [{{ "entities": ["ティアラ"], "text": "ティアラの事実", "evidence": ["{b}"] }}]
+        }}"#
+    );
+    series
+        .submit_answer(PromptKind::Story, 1, &answer)
+        .expect("the answer is submitted");
+    series
+}
+
+#[test]
+fn a_minor_entity_and_its_facts_are_left_out_of_the_package() {
+    let root = TempDir::new().expect("a temporary directory");
+    let series = minor_series(root.path());
+
+    let text = package_at(&series, 1, 120_000);
+
+    assert!(!text.contains("ティアラ"));
+}
+
+#[test]
+fn a_hand_setting_puts_a_minor_entity_in_the_package() {
+    let root = TempDir::new().expect("a temporary directory");
+    let series = minor_series(root.path());
+
+    series
+        .set_importance("ティアラ", Some(Importance::Recurring))
+        .expect("the importance is set");
+
+    let text = package_at(&series, 1, 120_000);
+    assert!(text.contains("name: \"ティアラ\""));
+    assert!(text.contains("ティアラの事実"));
+}
+
+#[test]
+fn a_character_has_sample_lines_in_the_package() {
+    let root = TempDir::new().expect("a temporary directory");
+    let series = series_with_episodes(root.path(), 2);
+    let answer = r#"{
+      "new_characters": [{ "name": "明智あんな", "importance": "main", "evidence": ["L1"] }],
+      "labels": [{ "label": "明智あんな", "kind": "character", "character": "明智あんな" }]
+    }"#;
+    series
+        .submit_answer(PromptKind::Speakers, 1, answer)
+        .expect("the answer is submitted");
+
+    let text = package_at(&series, 2, 0);
+
+    let entity = text
+        .split_once("name: \"明智あんな\"")
+        .expect("the character is listed")
+        .1;
+    assert!(
+        entity.trim_start().starts_with("kind: \"character\""),
+        "the entity has no reading"
+    );
+    assert!(entity.contains("lines:"), "the sample lines are missing");
 }

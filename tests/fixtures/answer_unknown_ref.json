@@ -2,5 +2,5 @@
   "new_characters": [],
   "labels": [],
   "colors": [],
-  "lines": [{ "line": "L2", "characters": ["誰か"] }]
+  "lines": [{ "from": "L2", "characters": ["誰か"] }]
 }

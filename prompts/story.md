@@ -1,4 +1,4 @@
-Extract information about the story from {{episode}} of an anime.
+Extract information about the story from {{episode}} of an anime. Use only this transcript. Reply with the JSON object only.
 
 Known entities:
 {{entities}}
@@ -6,23 +6,19 @@ Known entities:
 Known facts from earlier episodes:
 {{facts}}
 
-Transcript of {{episode}}. Each line has an ID, an episode, a time, a speaker label, the text, and the speaker ([?] is unknown, [-] is no speaker):
+Transcript of {{episode}}. Each line has an ID, the speaker ([?] is unknown, [-] is no speaker), and the text:
 {{transcript}}
 
 Tell me:
-- new entities: a person, a place, an organization, an object, or a concept. Give each one a kind, for example character, place, organization, object, or concept.
-- facts: one thing that the lines show about entities. For example, a trait that a character shows, a speech style, how one character calls another, a relationship, a goal, what a character knows, what happens, or a description of a place.
-- scenes: a range of lines in one place and one episode, with the place and a one-sentence summary of what happens.
+- new_entities: a person, a place, an organization, an object, or a concept that is not known yet. Give each one a kind, for example character, place, organization, object, or concept. Give an importance: main for a core character, recurring for one who comes back, minor for the rest.
+- importance: a known entity whose importance changed.
+- facts: what the lines show about the story, in one sentence: an event, a relationship, a goal, what a character knows, or a place. Do not write a speech style or how a person calls another. Do not repeat a known fact.
+- scenes: the first line (from) of each scene, its place, and a one-sentence summary. A scene runs to the start of the next scene.
 
 Rules:
-- Use only this transcript, not other knowledge of the series.
-- Name an entity exactly as in the list of known entities, or as you give it in the new entities.
+- Name an entity exactly as in the known entities or the new entities.
 - Write only what a line says or directly shows. Do not guess feelings or intent.
-- Write only new or changed information. Do not repeat a known fact.
-- Write the flow of the story in the scene summaries. Write facts that stay true about characters, relationships, and the world.
-- Give evidence lines for each entity and fact. Give the smallest set of lines that shows it. The last evidence line is the time when it becomes known.
-- To show an exchange, also give the line of the other speaker as evidence.
-- For a speech style, use lines that the character speaks. For a way to call someone, use lines that have the term.
+- Give 1 to 3 evidence lines for each new entity and fact. The last line is the time when it becomes known. To show an exchange, include a line of the other speaker.
 
 Reply with one JSON object in this format:
 {{format}}

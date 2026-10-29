@@ -46,7 +46,7 @@ The template for this document. Replace each placeholder in `<>`. Keep all other
 
 The library owns the logic and the files of a series. The app calls only the library. The project is one Rust crate (edition 2024) with a library, a GUI binary, and a CLI binary. The GUI and the CLI use the same series folders in the app data folder.
 
-- Files (`src/series/`, `src/sources/`, `src/suggestions/`; plain JSON, JSONL, and text files in a series directory): the source of truth. They own imported sources, parsed lines, and answers. A prompt is not a file. The library makes it from the files when it is needed. They must not hold data that the app can derive from other files.
+- Files (`src/series/`, `src/sources/`, `src/answers/`; plain JSON, JSONL, and text files in a series directory): the source of truth. They own imported sources, parsed lines, answers, and the importance that the user sets by hand (`importance.json`). A prompt is not a file. The library makes it from the files when it is needed. They must not hold data that the app can derive from other files.
 - Library (`src/`, without `bin/`; Rust, serde, regex): reads sources, parses subtitles, resolves speakers, builds the context package, and writes the files. It owns all logic and all file access. It must not depend on egui and must not have network code.
 - Index (`src/series/`, SQLite through rusqlite): derived from the files. It owns fast queries for the views. It must not hold any truth. The app rebuilds it after each write that changes data.
 - App (`src/bin/gui/`; egui through eframe, rfd for file dialogs): shows the views. It owns view state only. It calls only `Series`. It runs the slow write calls on worker threads. It must not read or write series files or the index directly.
@@ -86,5 +86,6 @@ The code is split by feature. A feature is a module with the same name as its di
 - The design does not assume that a series is finished. A new episode can be added at any time.
 - Every claim from an external model has evidence, which is lines of a source.
 - A context package holds nothing from after its position.
-- The app does not edit story data by item. It replaces the answer of an episode whole.
+- The app does not edit story data by item. It replaces the answer of an episode whole. The one exception is the importance of an entity, which the user can set by hand.
+- An importance is data about an entity, not a claim about the story, so it has no evidence. The latest answer up to an episode sets it, and a setting by hand wins over every answer.
 - The app calculates `since` when it rebuilds. No file stores it.

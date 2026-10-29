@@ -27,6 +27,16 @@ CREATE TABLE entities (
     since_episode INTEGER NOT NULL,
     since_ms INTEGER NOT NULL
 );
+-- The declarations of the answers, in the order of the answers. The hand settings are the second table.
+CREATE TABLE importance_declarations (
+    name TEXT NOT NULL,
+    episode INTEGER NOT NULL,
+    importance TEXT NOT NULL
+);
+CREATE TABLE importance_overrides (
+    name TEXT PRIMARY KEY,
+    importance TEXT NOT NULL
+);
 CREATE TABLE facts (
     id TEXT PRIMARY KEY,
     text TEXT NOT NULL,

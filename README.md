@@ -15,7 +15,7 @@ This makes two programs: `anime2ctxdb-gui` (the app) and `anime2ctxdb` (the comm
 1. Run `cargo run --release --bin anime2ctxdb-gui`.
 2. Make a series. In the Sources tab, import subtitle files or folders.
 3. In the Prompts tab, select an episode. The prompt shows on the right, with a Speakers tab and a Story tab. Copy it to an AI chat, paste the answer below it, and submit. The answer is data at once, and the next prompts know it.
-4. In the Data tab, look at the entities, the facts, and the scenes. To fix an episode, answer it again. A new answer replaces the old one.
+4. In the Data tab, look at the entities, the facts, and the scenes. To fix an episode, answer it again. A new answer replaces the old one. To change how much an entity matters (`main`, `recurring`, or `minor`), pick a value in the list of the entity. `auto` removes your setting.
 5. In the Package tab, make the context package for a point in the story.
 
 The app does not save prompts. It makes a prompt again from the series each time.

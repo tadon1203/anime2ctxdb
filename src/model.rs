@@ -1,3 +1,4 @@
+use crate::importance::Importance;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -22,6 +23,8 @@ pub struct Entity {
     pub kind: String,
     pub name: String,
     pub reading: Option<String>,
+    /// How much the entity matters at the point that the entity is read for.
+    pub importance: Importance,
 }
 
 /// A point in the story: an episode and a time in milliseconds.

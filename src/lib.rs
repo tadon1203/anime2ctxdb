@@ -1,5 +1,6 @@
 mod answers;
 mod files;
+mod importance;
 mod model;
 mod package;
 mod series;
@@ -10,6 +11,7 @@ use anyhow::{Result, bail};
 use std::path::PathBuf;
 
 pub use answers::prompt::{Prompt, PromptKind};
+pub use importance::Importance;
 pub use model::{Position, parse_clock};
 pub use series::{DataView, EntityRow, EpisodeProgress, FactRow, Removed, SceneRow, Series};
 pub use sources::{

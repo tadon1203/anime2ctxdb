@@ -3,6 +3,6 @@
   "labels": [{ "label": "あんな", "kind": "character", "character": "明智あんな" },
              { "label": "窓の開く音", "kind": "sound" }],
   "colors": [{ "color": "#FFFF00", "character": "明智あんな" }],
-  "lines": [{ "line": "L2", "characters": ["明智あんな"] },
-            { "line": "L3", "characters": [] }]
+  "lines": [{ "from": "L2", "characters": ["明智あんな"] },
+            { "from": "L3", "characters": [] }]
 }

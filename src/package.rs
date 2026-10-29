@@ -1,4 +1,5 @@
-use crate::model::{Entity, EntityId, Position, format_clock};
+use crate::importance::Importance;
+use crate::model::{CHARACTER, Entity, EntityId, Position, format_clock};
 use std::collections::{HashMap, HashSet};
 
 /// Everything the package can show at one position. The index reads it, and `build` only sorts it.
@@ -11,6 +12,14 @@ pub struct PackageInput {
     /// The scenes whose start is at or before `at`. This includes a scene in progress.
     pub scenes: Vec<PackageScene>,
     /// The lines of `at.episode` that end at or before `at`, in time order.
+    pub lines: Vec<PackageLine>,
+    /// The last lines of some characters that end at or before `at`, oldest first. They show how
+    /// a character speaks.
+    pub samples: Vec<PackageSample>,
+}
+
+pub struct PackageSample {
+    pub character: EntityId,
     pub lines: Vec<PackageLine>,
 }
 
@@ -100,26 +109,22 @@ pub fn build(input: &PackageInput) -> String {
         }
     }
 
-    let mut current_scene = vec![];
-    if let Some(place) = current
-        .and_then(|scene| scene.place.as_ref())
-        .and_then(|id| names.get(id))
-    {
-        current_scene.push(("place", text(place)));
+    let mut in_scene: HashSet<&EntityId> = seen;
+    if let Some(place) = current.and_then(|scene| scene.place.as_ref()) {
+        in_scene.insert(place);
     }
-    current_scene.push((
-        "speakers",
-        Node::List(speakers.into_iter().map(text).collect()),
-    ));
-    current_scene.push((
-        "lines",
-        Node::List(
-            current_lines
-                .iter()
-                .map(|line| line_node(line, &names))
-                .collect(),
-        ),
-    ));
+    let listed = listed_entities(&input.entities, &in_scene);
+    let listed_ids: HashSet<&EntityId> = listed.iter().map(|entity| &entity.id).collect();
+    let samples: HashMap<&EntityId, &PackageSample> = input
+        .samples
+        .iter()
+        .map(|sample| (&sample.character, sample))
+        .collect();
+
+    let place = current
+        .and_then(|scene| scene.place.as_ref())
+        .and_then(|id| names.get(id).copied());
+    let current_scene = current_scene_fields(place, &speakers, &current_lines, &names);
 
     let document = Node::Map(vec![
         (
@@ -131,7 +136,12 @@ pub fn build(input: &PackageInput) -> String {
         ),
         (
             "entities",
-            Node::List(input.entities.iter().map(entity_node).collect()),
+            Node::List(
+                listed
+                    .iter()
+                    .map(|entity| entity_node(entity, &samples, at, from_ms))
+                    .collect(),
+            ),
         ),
         (
             "scenes",
@@ -145,9 +155,7 @@ pub fn build(input: &PackageInput) -> String {
         (
             "facts",
             Node::List(
-                input
-                    .facts
-                    .iter()
+                listed_facts(&input.facts, &listed_ids)
                     .map(|fact| fact_node(fact, &names))
                     .collect(),
             ),
@@ -160,6 +168,45 @@ pub fn build(input: &PackageInput) -> String {
     lines.join("\n")
 }
 
+/// The entities that the package lists: the ones that matter, and the ones in the current scene.
+fn listed_entities<'a>(entities: &'a [Entity], in_scene: &HashSet<&EntityId>) -> Vec<&'a Entity> {
+    entities
+        .iter()
+        .filter(|entity| entity.importance != Importance::Minor || in_scene.contains(&entity.id))
+        .collect()
+}
+
+/// The facts that have no entity, or an entity that the package lists.
+fn listed_facts<'a>(
+    facts: &'a [PackageFact],
+    listed_ids: &'a HashSet<&EntityId>,
+) -> impl Iterator<Item = &'a PackageFact> {
+    facts.iter().filter(|fact| {
+        fact.entities.is_empty() || fact.entities.iter().any(|id| listed_ids.contains(id))
+    })
+}
+
+fn current_scene_fields(
+    place: Option<&str>,
+    speakers: &[&str],
+    lines: &[&PackageLine],
+    names: &HashMap<&EntityId, &str>,
+) -> Vec<(&'static str, Node)> {
+    let mut fields = vec![];
+    if let Some(place) = place {
+        fields.push(("place", text(place)));
+    }
+    fields.push((
+        "speakers",
+        Node::List(speakers.iter().map(|name| text(name)).collect()),
+    ));
+    fields.push((
+        "lines",
+        Node::List(lines.iter().map(|line| line_node(line, names)).collect()),
+    ));
+    fields
+}
+
 fn text(value: &str) -> Node {
     Node::Text(value.to_string())
 }
@@ -169,13 +216,41 @@ fn name_node(id: &EntityId, names: &HashMap<&EntityId, &str>) -> Option<Node> {
     names.get(id).map(|name| text(name))
 }
 
-fn entity_node(entity: &Entity) -> Node {
+/// An entity. A character also gets its sample lines, except the lines of the current scene,
+/// because the package shows those lines already.
+fn entity_node(
+    entity: &Entity,
+    samples: &HashMap<&EntityId, &PackageSample>,
+    at: Position,
+    scene_from_ms: u32,
+) -> Node {
     let mut fields = vec![("name", text(&entity.name))];
     if let Some(reading) = &entity.reading {
         fields.push(("reading", text(reading)));
     }
     fields.push(("kind", text(&entity.kind)));
+    if entity.kind == CHARACTER
+        && let Some(sample) = samples.get(&entity.id)
+    {
+        let lines: Vec<Node> = sample
+            .lines
+            .iter()
+            .filter(|line| !(line.episode == at.episode && line.start_ms >= scene_from_ms))
+            .map(sample_node)
+            .collect();
+        if !lines.is_empty() {
+            fields.push(("lines", Node::List(lines)));
+        }
+    }
     Node::Map(fields)
+}
+
+fn sample_node(line: &PackageLine) -> Node {
+    Node::Map(vec![
+        ("episode", Node::Number(line.episode)),
+        ("time", text(&format_clock(line.start_ms))),
+        ("text", text(&line.text)),
+    ])
 }
 
 fn scene_node(scene: &PackageScene, names: &HashMap<&EntityId, &str>) -> Node {

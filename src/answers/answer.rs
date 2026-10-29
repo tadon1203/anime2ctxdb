@@ -1,5 +1,6 @@
 use crate::answers::prompt::PromptKind;
 use crate::files::{enum_text, read_json};
+use crate::importance::Importance;
 use crate::sources::ass::LineId;
 use crate::speakers::LabelKind;
 use anyhow::{Context, Result};
@@ -44,7 +45,16 @@ pub struct NewEntity {
     pub kind: String,
     pub name: String,
     pub reading: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub importance: Option<Importance>,
     pub evidence: Evidence,
+}
+
+/// A new importance for an entity that earlier answers introduced.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportanceChange {
+    pub name: String,
+    pub importance: Importance,
 }
 
 /// What a speaker label means. `character` is the name of an entity.
@@ -77,8 +87,8 @@ pub struct Fact {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Scene {
+    /// The scene runs to the start of the next scene, or to the end of the episode.
     pub start: LineId,
-    pub end: LineId,
     pub place: Option<String>,
     pub summary: String,
 }
@@ -101,6 +111,8 @@ pub enum Answer {
         entities: Vec<NewEntity>,
         facts: Vec<Fact>,
         scenes: Vec<Scene>,
+        #[serde(default)]
+        importance: Vec<ImportanceChange>,
     },
 }
 
@@ -132,8 +144,9 @@ impl Answer {
                 entities,
                 facts,
                 scenes,
+                importance,
                 ..
-            } => entities.len() + facts.len() + scenes.len(),
+            } => entities.len() + facts.len() + scenes.len() + importance.len(),
         }
     }
 }

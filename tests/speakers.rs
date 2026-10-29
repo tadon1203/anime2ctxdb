@@ -245,3 +245,44 @@ fn an_answer_marks_its_episode_as_answered_for_its_kind_only() {
     assert_eq!(speakers.into_iter().collect::<Vec<_>>(), [1]);
     assert!(story.is_empty());
 }
+
+#[test]
+fn a_range_of_lines_gives_each_line_its_speaker() {
+    let root = TempDir::new().expect("a temporary directory");
+    let series = series_with_episodes(root.path(), 1);
+    let answer = r#"{
+      "new_characters": [{ "name": "明智あんな", "evidence": ["L1"] }],
+      "lines": [{ "from": "L1", "to": "L3", "characters": ["明智あんな"] }]
+    }"#;
+
+    let count = series
+        .submit_answer(PromptKind::Speakers, 1, answer)
+        .expect("the answer is submitted");
+
+    assert_eq!(count, 4);
+    let saved = std::fs::read_to_string(root.path().join("show/answers/speakers-1.json"))
+        .expect("the answer file reads");
+    let saved: serde_json::Value = serde_json::from_str(&saved).expect("the file is JSON");
+    assert_eq!(saved["lines"].as_array().map(Vec::len), Some(3));
+}
+
+#[test]
+fn the_prompt_has_no_episode_in_a_line() {
+    let root = TempDir::new().expect("a temporary directory");
+    let series = series_with_episodes(root.path(), 1);
+
+    let prompt = series
+        .prompt(PromptKind::Speakers, 1)
+        .expect("the prompt is made");
+
+    let first = prompt
+        .text
+        .lines()
+        .find(|line| line.starts_with("L1 "))
+        .expect("the transcript has a first line");
+    let second = first.split(' ').nth(1).expect("the line has a time");
+    assert!(
+        second.starts_with(|c: char| c.is_ascii_digit()),
+        "the time follows the reference, not an episode: {first}"
+    );
+}

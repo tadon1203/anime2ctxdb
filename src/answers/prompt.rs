@@ -2,7 +2,7 @@ pub mod speakers;
 pub mod story;
 
 use crate::answers::answer::{Answer, Evidence};
-use crate::model::{CHARACTER, Entity, format_clock};
+use crate::model::{CHARACTER, Entity};
 use crate::sources::ass::LineId;
 use crate::speakers::Speaker;
 use serde::{Deserialize, Serialize};
@@ -35,7 +35,6 @@ pub struct Prompt {
 
 pub struct PromptLine {
     pub id: LineId,
-    pub episode: u32,
     pub start_ms: u32,
     pub color: Option<u32>,
     pub label: Option<String>,
@@ -58,8 +57,10 @@ pub enum AnswerError {
         section: &'static str,
         position: usize,
     },
-    #[error("scene {0} ends before it starts")]
+    #[error("scene {0} does not start after the previous scene")]
     SceneOrder(usize),
+    #[error("range {0} of lines ends before it starts")]
+    LineRange(usize),
 }
 
 /// Reads the answer to the prompt. The kind of the prompt picks the parser.
@@ -101,28 +102,18 @@ fn entity_list(entities: &[Entity]) -> Vec<String> {
         .collect()
 }
 
-/// Writes the transcript lines with `L` references. A speaker is written with its name.
-fn transcript(lines: &[PromptLine], refs: &mut BTreeMap<String, String>) -> Vec<String> {
-    let mut transcript = Vec::new();
-    for (index, line) in lines.iter().enumerate() {
-        let reference = format!("L{}", index + 1);
-        refs.insert(reference.clone(), line.id.0.clone());
-        let mut parts = vec![
-            reference,
-            format!("E{}", line.episode),
-            format_clock(line.start_ms),
-        ];
-        if let Some(color) = line.color {
-            parts.push(format!("#{color:06X}"));
-        }
-        if let Some(label) = &line.label {
-            parts.push(format!("（{label}）"));
-        }
-        parts.push(line.text.clone());
-        parts.push(speaker_text(&line.speaker));
-        transcript.push(parts.join(" "));
-    }
-    transcript
+/// Gives the next line its short reference, `L1` for the first line, and remembers its real ID.
+fn reference(line: &PromptLine, refs: &mut BTreeMap<String, String>) -> String {
+    let reference = format!("L{}", refs.len() + 1);
+    refs.insert(reference.clone(), line.id.0.clone());
+    reference
+}
+
+/// The number of an `L` reference. Only a reference that `line_ref` accepted comes here.
+fn line_number(reference: &str) -> u32 {
+    reference[1..]
+        .parse()
+        .expect("a line reference has a number")
 }
 
 /// Reads the line references of one entry of an answer. An entry needs at least one line.

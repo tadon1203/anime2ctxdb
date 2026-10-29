@@ -1,4 +1,4 @@
-use anime2ctxdb::{PromptKind, Series, app_data_dir};
+use anime2ctxdb::{Importance, PromptKind, Series, app_data_dir};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::fs;
@@ -34,8 +34,44 @@ enum Command {
         #[command(subcommand)]
         command: AnswerCommand,
     },
+    /// Sets the importance of an entity by hand.
+    Importance {
+        #[command(subcommand)]
+        command: ImportanceCommand,
+    },
     /// Lists the episodes that have a Ja subtitle, and whether each has an answer of each kind.
     Status,
+}
+
+#[derive(Debug, Subcommand)]
+enum ImportanceCommand {
+    /// Sets the importance of an entity. A hand setting wins over every answer. `auto` removes it.
+    Set {
+        #[arg(long)]
+        name: String,
+
+        #[arg(long)]
+        value: ImportanceArg,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ImportanceArg {
+    Main,
+    Recurring,
+    Minor,
+    Auto,
+}
+
+impl From<ImportanceArg> for Option<Importance> {
+    fn from(value: ImportanceArg) -> Option<Importance> {
+        match value {
+            ImportanceArg::Main => Some(Importance::Main),
+            ImportanceArg::Recurring => Some(Importance::Recurring),
+            ImportanceArg::Minor => Some(Importance::Minor),
+            ImportanceArg::Auto => None,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -100,8 +136,19 @@ fn run() -> Result<()> {
     match cli.command {
         Command::Prompt { command } => prompt(&series, &command),
         Command::Answer { command } => answer(&series, command),
+        Command::Importance { command } => importance(&series, &command),
         Command::Status => status(&series),
     }
+}
+
+fn importance(series: &Series, command: &ImportanceCommand) -> Result<()> {
+    match command {
+        ImportanceCommand::Set { name, value } => {
+            series.set_importance(name, (*value).into())?;
+            println!("saved");
+        }
+    }
+    Ok(())
 }
 
 fn prompt(series: &Series, command: &PromptCommand) -> Result<()> {
