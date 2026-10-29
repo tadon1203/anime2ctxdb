@@ -10,6 +10,8 @@ cargo build --release
 
 This makes two programs: `anime2ctxdb-gui` (the app) and `anime2ctxdb` (the command line).
 
+The font `assets/NotoSansCJK.ttc` is not in git. The build needs it, so put a copy of Noto Sans CJK there before you build. The font is in the executable. Its license is in `assets/LICENSE-NotoSansCJK`.
+
 ## Use the app
 
 1. Run `cargo run --release --bin anime2ctxdb-gui`.
